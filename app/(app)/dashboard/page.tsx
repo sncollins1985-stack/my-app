@@ -21,14 +21,14 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <AppHeader breadcrumbs={[{ label: "Dashboard" }]} />
+      <AppHeader breadcrumbs={[{ label: "Home" }]} />
       <div className="flex flex-1 flex-col gap-6 p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Home</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Signed in as{" "}
-              <span className="font-medium text-foreground">{user?.username}</span>
+              <span className="font-medium text-foreground">{user?.email}</span>
             </p>
           </div>
           <Button asChild className="gap-2">

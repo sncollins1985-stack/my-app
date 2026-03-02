@@ -31,7 +31,7 @@ export default function AssurancePage() {
     <>
       <AppHeader
         breadcrumbs={[
-          { label: "Dashboard", href: "/dashboard" },
+          { label: "Home", href: "/dashboard" },
           { label: "Assurance" },
         ]}
       />

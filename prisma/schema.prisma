@@ -8,17 +8,20 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  firstName    String?
+  lastName     String?
+  lastLoggedIn DateTime?
+  createdAt    DateTime  @default(now())
 }
 model AuthUser {
-  id           Int       @id @default(autoincrement())
-  username     String    @unique
-  passwordHash String
-  createdAt    DateTime  @default(now())
-  sessions     Session[]
+  id                  Int                  @id @default(autoincrement())
+  email               String               @unique
+  passwordHash        String
+  createdAt           DateTime             @default(now())
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
 }
 model Session {
   id        Int      @id @default(autoincrement())
@@ -29,4 +32,29 @@ model Session {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+model PasswordResetToken {
+  id         Int       @id @default(autoincrement())
+  authUserId Int
+  authUser   AuthUser  @relation(fields: [authUserId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([authUserId])
+  @@index([expiresAt])
+}
+
+model OutboundEmail {
+  id        Int      @id @default(autoincrement())
+  to        String
+  subject   String
+  html      String
+  text      String
+  kind      String
+  createdAt DateTime @default(now())
+
+  @@index([kind, createdAt])
 }

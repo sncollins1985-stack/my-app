@@ -16,7 +16,7 @@ export default async function AppLayout({
 
   return (
     <SidebarProvider>
-      <AppSidebar username={user.username} />
+      <AppSidebar userEmail={user.email} />
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>
   );
