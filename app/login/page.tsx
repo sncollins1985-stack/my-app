@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { NedryScreen } from "@/components/nedry-screen";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,6 +11,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showNedry, setShowNedry] = useState(false);
 
   async function seed() {
     const res = await fetch("/api/auth/seed", { method: "POST" });
@@ -34,10 +36,23 @@ export default function LoginPage() {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       setError(data?.error ?? "Login failed");
+      if (res.status === 401) {
+        setShowNedry(true);
+      }
       return;
     }
 
     router.push("/dashboard");
+  }
+
+  function onRetry() {
+    setShowNedry(false);
+    setPassword("");
+    setError(null);
+  }
+
+  if (showNedry) {
+    return <NedryScreen onRetry={onRetry} />;
   }
 
   return (
