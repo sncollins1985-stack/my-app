@@ -18,6 +18,8 @@ export function ProfilePasswordForm() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const requirementChecks = getPasswordRequirementChecks(newPassword);
+  const isPasswordValid = requirementChecks.every((requirement) => requirement.met);
+  const isPasswordMatch = newPassword === confirmPassword;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -31,7 +33,7 @@ export function ProfilePasswordForm() {
     }
 
     if (newPassword !== confirmPassword) {
-      setError("New passwords do not match");
+      setError("Passwords must match");
       return;
     }
 
@@ -140,6 +142,9 @@ export function ProfilePasswordForm() {
             )}
           </button>
         </div>
+        {!isPasswordMatch && confirmPassword ? (
+          <p className="text-sm text-red-600">Passwords must match</p>
+        ) : null}
         <div className="rounded-lg border bg-muted/30 p-4">
           <p className="text-sm font-medium text-foreground">Password requirements</p>
           <ul className="mt-3 space-y-2">
@@ -167,7 +172,7 @@ export function ProfilePasswordForm() {
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       {success ? <p className="text-sm text-emerald-600">{success}</p> : null}
 
-      <Button type="submit" disabled={saving}>
+      <Button type="submit" disabled={saving || !isPasswordValid || !isPasswordMatch}>
         {saving ? "Updating..." : "Update password"}
       </Button>
     </form>

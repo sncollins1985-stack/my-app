@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { Check, Circle } from "lucide-react";
+import { getPasswordPolicyError, getPasswordRequirementChecks } from "@/lib/password-policy";
 
 interface ResetPasswordFormProps {
   token: string;
@@ -13,6 +15,9 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const requirementChecks = getPasswordRequirementChecks(password);
+  const isPasswordValid = requirementChecks.every((requirement) => requirement.met);
+  const isPasswordMatch = password === confirmPassword;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -23,8 +28,14 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
       return;
     }
 
+    const passwordPolicyError = getPasswordPolicyError(password);
+    if (passwordPolicyError) {
+      setError(passwordPolicyError);
+      return;
+    }
+
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError("Passwords must match");
       return;
     }
 
@@ -86,12 +97,37 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
               placeholder="Confirm new password"
               className="w-full rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-white outline-none transition placeholder:text-white/45 focus:ring-2 focus:ring-sky-400"
             />
+            {!isPasswordMatch && confirmPassword ? (
+              <p className="text-sm text-red-300">Passwords must match</p>
+            ) : null}
+            <div className="rounded-2xl border border-white/20 bg-white/10 p-4">
+              <p className="text-sm font-medium text-white">Password requirements</p>
+              <ul className="mt-3 space-y-2">
+                {requirementChecks.map((requirement) => (
+                  <li
+                    key={requirement.id}
+                    className="flex items-center gap-2 text-sm text-white/70"
+                  >
+                    {requirement.met ? (
+                      <Check className="size-4 text-emerald-300" />
+                    ) : (
+                      <Circle className="size-4 text-white/40" />
+                    )}
+                    <span
+                      className={requirement.met ? "text-emerald-200" : "text-white/70"}
+                    >
+                      {requirement.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
             {error ? <p className="text-sm text-red-300">{error}</p> : null}
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !isPasswordValid || !isPasswordMatch}
               className="w-full rounded-full bg-sky-500 px-4 py-3 font-medium text-white transition hover:bg-sky-400 disabled:opacity-60"
             >
               {loading ? "Resetting password..." : "Reset password"}
