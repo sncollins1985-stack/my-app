@@ -47,6 +47,15 @@ model PasswordResetToken {
   @@index([expiresAt])
 }
 
+model Project {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
 model OutboundEmail {
   id        Int      @id @default(autoincrement())
   to        String

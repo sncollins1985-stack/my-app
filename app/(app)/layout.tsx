@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ProjectCreateDialog } from "@/components/project-create-dialog";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
 export default async function AppLayout({
@@ -18,6 +19,7 @@ export default async function AppLayout({
     <SidebarProvider>
       <AppSidebar userEmail={user.email} />
       <SidebarInset>{children}</SidebarInset>
+      <ProjectCreateDialog currentUserEmail={user.email} />
     </SidebarProvider>
   );
 }

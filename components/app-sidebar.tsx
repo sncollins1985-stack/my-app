@@ -1,10 +1,14 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { ForrestLogo } from "@/components/forrest-logo";
+import {
+  PROJECT_CREATED_EVENT,
+} from "@/components/project-create-events";
+import { CreateProjectTrigger } from "@/components/create-project-trigger";
 import {
   Collapsible,
   CollapsibleContent,
@@ -20,6 +24,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarSeparator,
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
@@ -29,14 +34,82 @@ interface AppSidebarProps {
   userEmail: string;
 }
 
+type ProjectItem = {
+  id: string;
+  name: string;
+};
+
 export function AppSidebar({ userEmail }: AppSidebarProps) {
   const pathname = usePathname();
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [projectsSectionOpen, setProjectsSectionOpen] = useState(() =>
+    pathname.startsWith("/projects")
+  );
+  const [administrationSectionOpen, setAdministrationSectionOpen] = useState(() =>
+    pathname.startsWith("/users")
+  );
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
     () => false
   );
   const administrationOpen = pathname.startsWith("/users");
+  const projectsOpen = pathname.startsWith("/projects");
+  const activeProjectPath = pathname.startsWith("/projects/")
+    ? pathname
+    : null;
+
+  useEffect(() => {
+    if (projectsOpen) {
+      setProjectsSectionOpen(true);
+    }
+  }, [projectsOpen]);
+
+  useEffect(() => {
+    if (administrationOpen) {
+      setAdministrationSectionOpen(true);
+    }
+  }, [administrationOpen]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadProjects() {
+      const response = await fetch("/api/projects");
+      if (!response.ok || !active) {
+        return;
+      }
+
+      const payload = await response.json().catch(() => []);
+      if (!Array.isArray(payload)) {
+        return;
+      }
+
+      setProjects(
+        payload
+          .map((entry) => ({
+            id: String(entry.id),
+            name:
+              typeof entry.name === "string" && entry.name.trim().length > 0
+                ? entry.name.trim()
+                : "Unnamed project",
+          }))
+          .filter((entry) => entry.name.length > 0)
+      );
+    }
+
+    const handleProjectCreated = () => {
+      void loadProjects();
+    };
+
+    window.addEventListener(PROJECT_CREATED_EVENT, handleProjectCreated);
+    void loadProjects();
+
+    return () => {
+      active = false;
+      window.removeEventListener(PROJECT_CREATED_EVENT, handleProjectCreated);
+    };
+  }, []);
 
   if (!mounted) {
     return (
@@ -94,21 +167,87 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
-              <Collapsible asChild defaultOpen={administrationOpen}>
+        <SidebarSeparator />
+
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+
+              <Collapsible
+                asChild
+                open={projectsSectionOpen}
+                onOpenChange={setProjectsSectionOpen}
+              >
+                <SidebarMenuItem>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton
+                      tooltip="Projects"
+                      className="group/collapsible"
+                    >
+                      <span>Projects</span>
+                      <ChevronRight className="ml-auto size-4 text-sidebar-foreground/60 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenuSub className="mx-2 border-l-0 px-1.5">
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton asChild>
+                          <CreateProjectTrigger className="inline-flex w-full items-center gap-2">
+                            <Plus className="size-4" />
+                            <span>Create project</span>
+                          </CreateProjectTrigger>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                      {projects.length === 0 ? (
+                        <SidebarMenuSubItem>
+                          <span className="text-sidebar-foreground/60 text-sm">
+                            No projects yet
+                          </span>
+                        </SidebarMenuSubItem>
+                      ) : (
+                        projects.map((project) => (
+                          <SidebarMenuSubItem key={project.id}>
+                            <SidebarMenuSubButton
+                              asChild
+                              isActive={activeProjectPath === `/projects/${project.id}`}
+                            >
+                              <Link
+                                href={`/projects/${encodeURIComponent(
+                                  project.id
+                                )}`}
+                              >
+                                <span>{project.name}</span>
+                              </Link>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))
+                      )}
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
+
+              <Collapsible
+                asChild
+                open={administrationSectionOpen}
+                onOpenChange={setAdministrationSectionOpen}
+              >
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
                     <SidebarMenuButton
                       tooltip="Administration"
-                      isActive={pathname.startsWith("/users")}
                       className="group/collapsible"
                     >
                       <span>Administration</span>
-                      <ChevronRight className="ml-auto size-4 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                      <ChevronRight className="ml-auto size-4 text-sidebar-foreground/60 transition-transform group-data-[state=open]/collapsible:rotate-90" />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <SidebarMenuSub>
+                    <SidebarMenuSub className="mx-2 border-l-0 px-1.5">
                       <SidebarMenuSubItem>
                         <SidebarMenuSubButton
                           asChild

@@ -10,6 +10,7 @@ export default async function UsersPage() {
       <AppHeader
         breadcrumbs={[
           { label: "Home", href: "/dashboard" },
+          { label: "Administration", href: "/users" },
           { label: "Manage users" },
         ]}
       />
