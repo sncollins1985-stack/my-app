@@ -1,11 +1,13 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { CircleAlert, X } from "lucide-react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarDays, CircleAlert, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -54,6 +56,14 @@ type TaskActivityItem = {
   createdAt: string;
 };
 
+type TaskCommentItem = {
+  id: number;
+  authorName: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TaskDrawerTask = {
   id: number;
   title: string;
@@ -76,6 +86,16 @@ interface TaskDrawerProps {
   onOpenChange: (nextOpen: boolean) => void;
 }
 
+type TaskMutationPayload = {
+  title: string;
+  description: string;
+  assigneeId: string | null;
+  dueDate: string | null;
+  priority: PriorityValue;
+  status: StatusValue;
+  projectId: string;
+};
+
 const priorityOptions: { value: PriorityValue; label: string }[] = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
@@ -92,6 +112,26 @@ const statusOptions: { value: StatusValue; label: string }[] = [
 
 function normalizeTaskTitle(value: string) {
   return value.trim();
+}
+
+function buildTaskMutationPayload(params: {
+  title: string;
+  description: string;
+  assigneeId: string;
+  dueDate: string;
+  priority: PriorityValue;
+  status: StatusValue;
+  projectId: string;
+}): TaskMutationPayload {
+  return {
+    title: normalizeTaskTitle(params.title),
+    description: params.description.trim(),
+    assigneeId: params.assigneeId === "unassigned" ? null : params.assigneeId,
+    dueDate: params.dueDate.trim() || null,
+    priority: params.priority,
+    status: params.status,
+    projectId: params.projectId,
+  };
 }
 
 function toInputPriority(value: TaskPriorityValue): PriorityValue {
@@ -135,14 +175,30 @@ function formatAssigneeLabel(user: {
   return user.email?.trim() || "Unknown user";
 }
 
+function formatTaskAssigneeFallback(task: TaskDrawerTask) {
+  const fullName = [task.assigneeFirstName ?? "", task.assigneeLastName ?? ""].join(" ").trim();
+  if (fullName) {
+    return task.assigneeEmail ? `${fullName} (${task.assigneeEmail})` : fullName;
+  }
+
+  return task.assigneeEmail?.trim() || "Assigned";
+}
+
 function normalizeDateForInput(value: string | null) {
   if (!value) {
     return "";
   }
 
-  const isoDateMatch = value.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (isoDateMatch?.[1]) {
-    return isoDateMatch[1];
+  const slashDateMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashDateMatch) {
+    const [, dayPart, monthPart, yearPart] = slashDateMatch;
+    return `${dayPart.padStart(2, "0")}/${monthPart.padStart(2, "0")}/${yearPart}`;
+  }
+
+  const isoDateMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoDateMatch) {
+    const [, yearPart, monthPart, dayPart] = isoDateMatch;
+    return `${dayPart}/${monthPart}/${yearPart}`;
   }
 
   const date = new Date(value);
@@ -150,10 +206,60 @@ function normalizeDateForInput(value: string | null) {
     return "";
   }
 
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return formatDateForInput(date);
+}
+
+function parseDateInputValue(value: string) {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const slashMatch = normalizedValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, dayPart, monthPart, yearPart] = slashMatch;
+    const year = Number(yearPart);
+    const month = Number(monthPart);
+    const day = Number(dayPart);
+    const date = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() + 1 === month &&
+      date.getUTCDate() === day
+    ) {
+      return date;
+    }
+
+    return null;
+  }
+
+  const isoMatch = normalizedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!isoMatch) {
+    return null;
+  }
+
+  const year = Number(isoMatch[1]);
+  const month = Number(isoMatch[2]);
+  const day = Number(isoMatch[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() + 1 !== month ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function formatDateForInput(date: Date) {
   const day = String(date.getUTCDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  return `${day}/${month}/${year}`;
 }
 
 function formatActivityField(field: TaskActivityFieldValue | null) {
@@ -230,15 +336,42 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
   const [priority, setPriority] = useState<PriorityValue>("medium");
   const [status, setStatus] = useState<StatusValue>("not_started");
   const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[] | null>(null);
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("comments");
   const [activityItems, setActivityItems] = useState<TaskActivityItem[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
+  const [commentBody, setCommentBody] = useState("");
+  const [commentItems, setCommentItems] = useState<TaskCommentItem[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [commentSaving, setCommentSaving] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [lastSavedPayload, setLastSavedPayload] = useState<string | null>(null);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoSaveTimeoutRef = useRef<number | null>(null);
+  const lastAttemptedPayloadRef = useRef<string | null>(null);
+  const resolvedAssigneeOptions = useMemo(() => {
+    const options = [...(assigneeOptions ?? [])];
+
+    if (mode === "edit" && task?.assigneeId) {
+      const taskAssigneeId = String(task.assigneeId);
+      const alreadyPresent = options.some((option) => option.id === taskAssigneeId);
+      if (!alreadyPresent) {
+        options.unshift({
+          id: taskAssigneeId,
+          label: formatTaskAssigneeFallback(task),
+        });
+      }
+    }
+
+    return options;
+  }, [assigneeOptions, mode, task]);
+  const normalizedCommentBody = commentBody.trim();
 
   useEffect(() => {
-    if (!open) {
+    if (!open || mode !== "create") {
       return;
     }
 
@@ -247,7 +380,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
     });
 
     return () => window.cancelAnimationFrame(id);
-  }, [open]);
+  }, [mode, open]);
 
   useEffect(() => {
     if (!open) {
@@ -257,15 +390,40 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
     const id = window.requestAnimationFrame(() => {
       setError(null);
       setSaving(false);
+      setCommentSaving(false);
       setActiveTab("comments");
+      setAutoSaveEnabled(false);
+      setCommentsError(null);
+
+      if (autoSaveTimeoutRef.current !== null) {
+        window.clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+      lastAttemptedPayloadRef.current = null;
 
       if (mode === "edit" && task) {
+        const initialDueDate = normalizeDateForInput(task.dueDate);
+        const initialPayload = buildTaskMutationPayload({
+          title: task.title,
+          description: task.description ?? "",
+          assigneeId: task.assigneeId ? String(task.assigneeId) : "unassigned",
+          dueDate: initialDueDate,
+          priority: toInputPriority(task.priority),
+          status: toInputStatus(task.status),
+          projectId,
+        });
+
         setTitle(task.title);
         setDescription(task.description ?? "");
         setAssigneeId(task.assigneeId ? String(task.assigneeId) : "unassigned");
-        setDueDate(normalizeDateForInput(task.dueDate));
+        setDueDate(initialDueDate);
         setPriority(toInputPriority(task.priority));
         setStatus(toInputStatus(task.status));
+        setCommentBody("");
+        setCommentItems([]);
+        setCommentsLoading(false);
+        setLastSavedPayload(JSON.stringify(initialPayload));
+        setAutoSaveEnabled(true);
         return;
       }
 
@@ -275,12 +433,17 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
       setDueDate("");
       setPriority("medium");
       setStatus("not_started");
+      setCommentBody("");
+      setCommentItems([]);
+      setCommentsLoading(false);
       setActivityItems([]);
       setActivityError(null);
+      setLastSavedPayload(null);
+      lastAttemptedPayloadRef.current = null;
     });
 
     return () => window.cancelAnimationFrame(id);
-  }, [mode, open, task]);
+  }, [mode, open, projectId, task]);
 
   useEffect(() => {
     if (!open || assigneeOptions !== null) {
@@ -329,78 +492,242 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
     };
   }, [assigneeOptions, open]);
 
-  useEffect(() => {
-    if (!open || mode !== "edit" || !task) {
-      return;
-    }
+  const loadTaskActivity = useCallback(
+    async (taskId: number, options?: { background?: boolean }) => {
+      const background = options?.background ?? false;
 
-    const taskId = task.id;
-    let active = true;
-
-    async function loadActivity() {
-      setActivityLoading(true);
+      if (!background) {
+        setActivityLoading(true);
+        setActivityItems([]);
+      }
       setActivityError(null);
-      setActivityItems([]);
 
       const response = await fetch(`/api/tasks/${taskId}/activity`);
       if (!response.ok) {
-        if (active) {
-          setActivityError(await readErrorMessage(response));
+        setActivityError(await readErrorMessage(response));
+        if (!background) {
           setActivityItems([]);
-          setActivityLoading(false);
         }
+        setActivityLoading(false);
         return;
       }
 
       const payload = await response.json().catch(() => []);
       if (!Array.isArray(payload)) {
-        if (active) {
-          setActivityError("Activity response was invalid");
+        setActivityError("Activity response was invalid");
+        if (!background) {
           setActivityItems([]);
-          setActivityLoading(false);
         }
+        setActivityLoading(false);
         return;
       }
 
-      if (active) {
-        const normalized = payload
-          .map((entry) => ({
-            id: Number(entry.id),
-            userName: typeof entry.userName === "string" ? entry.userName : "Unknown user",
-            actionType:
-              entry.actionType === "CREATED" || entry.actionType === "FIELD_CHANGED"
-                ? entry.actionType
-                : "FIELD_CHANGED",
-            field:
-              entry.field === "TITLE" ||
-              entry.field === "DESCRIPTION" ||
-              entry.field === "ASSIGNEE" ||
-              entry.field === "DUE_DATE" ||
-              entry.field === "PRIORITY" ||
-              entry.field === "STATUS"
-                ? entry.field
-                : null,
-            oldValue: typeof entry.oldValue === "string" ? entry.oldValue : null,
-            newValue: typeof entry.newValue === "string" ? entry.newValue : null,
-            createdAt: typeof entry.createdAt === "string" ? entry.createdAt : "",
-          }))
-          .filter((entry) => Number.isInteger(entry.id) && entry.id > 0);
+      const normalized = payload
+        .map((entry) => ({
+          id: Number(entry.id),
+          userName: typeof entry.userName === "string" ? entry.userName : "Unknown user",
+          actionType:
+            entry.actionType === "CREATED" || entry.actionType === "FIELD_CHANGED"
+              ? entry.actionType
+              : "FIELD_CHANGED",
+          field:
+            entry.field === "TITLE" ||
+            entry.field === "DESCRIPTION" ||
+            entry.field === "ASSIGNEE" ||
+            entry.field === "DUE_DATE" ||
+            entry.field === "PRIORITY" ||
+            entry.field === "STATUS"
+              ? entry.field
+              : null,
+          oldValue: typeof entry.oldValue === "string" ? entry.oldValue : null,
+          newValue: typeof entry.newValue === "string" ? entry.newValue : null,
+          createdAt: typeof entry.createdAt === "string" ? entry.createdAt : "",
+        }))
+        .filter((entry) => Number.isInteger(entry.id) && entry.id > 0);
 
-        setActivityItems(normalized);
-        setActivityLoading(false);
+      setActivityItems(normalized);
+      setActivityLoading(false);
+    },
+    []
+  );
+
+  const loadTaskComments = useCallback(
+    async (taskId: number, options?: { background?: boolean }) => {
+      const background = options?.background ?? false;
+
+      if (!background) {
+        setCommentsLoading(true);
+        setCommentItems([]);
       }
+      setCommentsError(null);
+
+      const response = await fetch(`/api/tasks/${taskId}/comments`);
+      if (!response.ok) {
+        setCommentsError(await readErrorMessage(response));
+        if (!background) {
+          setCommentItems([]);
+        }
+        setCommentsLoading(false);
+        return;
+      }
+
+      const payload = await response.json().catch(() => []);
+      if (!Array.isArray(payload)) {
+        setCommentsError("Comments response was invalid");
+        if (!background) {
+          setCommentItems([]);
+        }
+        setCommentsLoading(false);
+        return;
+      }
+
+      const normalized = payload
+        .map((entry) => ({
+          id: Number(entry.id),
+          authorName: typeof entry.authorName === "string" ? entry.authorName : "Unknown user",
+          body: typeof entry.body === "string" ? entry.body : "",
+          createdAt: typeof entry.createdAt === "string" ? entry.createdAt : "",
+          updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
+        }))
+        .filter((entry) => Number.isInteger(entry.id) && entry.id > 0 && entry.body.trim().length > 0);
+
+      setCommentItems(normalized);
+      setCommentsLoading(false);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!open || mode !== "edit" || !task) {
+      return;
     }
 
-    void loadActivity();
+    const id = window.requestAnimationFrame(() => {
+      void loadTaskActivity(task.id);
+    });
+
+    return () => window.cancelAnimationFrame(id);
+  }, [loadTaskActivity, mode, open, task]);
+
+  useEffect(() => {
+    if (!open || mode !== "edit" || !task || activeTab !== "comments") {
+      return;
+    }
+
+    const id = window.requestAnimationFrame(() => {
+      void loadTaskComments(task.id);
+    });
+
+    return () => window.cancelAnimationFrame(id);
+  }, [activeTab, loadTaskComments, mode, open, task]);
+
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeoutRef.current !== null) {
+        window.clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open || mode !== "edit" || !task || !autoSaveEnabled) {
+      return;
+    }
+
+    const payload = buildTaskMutationPayload({
+      title,
+      description,
+      assigneeId,
+      dueDate,
+      priority,
+      status,
+      projectId,
+    });
+
+    if (!payload.title) {
+      return;
+    }
+
+    if (payload.dueDate && !parseDateInputValue(payload.dueDate)) {
+      return;
+    }
+
+    const serializedPayload = JSON.stringify(payload);
+    if (
+      serializedPayload === lastSavedPayload ||
+      serializedPayload === lastAttemptedPayloadRef.current ||
+      saving
+    ) {
+      return;
+    }
+
+    if (autoSaveTimeoutRef.current !== null) {
+      window.clearTimeout(autoSaveTimeoutRef.current);
+      autoSaveTimeoutRef.current = null;
+    }
+
+    autoSaveTimeoutRef.current = window.setTimeout(() => {
+      autoSaveTimeoutRef.current = null;
+
+      void (async () => {
+        setSaving(true);
+        lastAttemptedPayloadRef.current = serializedPayload;
+
+        const response = await fetch(`/api/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        setSaving(false);
+
+        if (!response.ok) {
+          setError(await readErrorMessage(response));
+          return;
+        }
+
+        setError(null);
+        setLastSavedPayload(serializedPayload);
+        lastAttemptedPayloadRef.current = null;
+        void loadTaskActivity(task.id, { background: true });
+        router.refresh();
+      })();
+    }, 700);
 
     return () => {
-      active = false;
+      if (autoSaveTimeoutRef.current !== null) {
+        window.clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
     };
-  }, [mode, open, task]);
+  }, [
+    assigneeId,
+    autoSaveEnabled,
+    description,
+    dueDate,
+    lastSavedPayload,
+    loadTaskActivity,
+    mode,
+    open,
+    priority,
+    projectId,
+    router,
+    saving,
+    status,
+    task,
+    title,
+  ]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+
+    if (mode !== "create") {
+      return;
+    }
 
     const normalizedTitle = normalizeTaskTitle(title);
     if (!normalizedTitle) {
@@ -408,17 +735,15 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
       return;
     }
 
-    if (mode === "edit" && !task) {
-      setError("Task details are unavailable");
+    if (dueDate && !parseDateInputValue(dueDate)) {
+      setError("Due date must use DD/MM/YYYY");
       return;
     }
 
     setSaving(true);
 
-    const endpoint = mode === "create" ? "/api/tasks" : `/api/tasks/${task!.id}`;
-    const method = mode === "create" ? "POST" : "PATCH";
-    const response = await fetch(endpoint, {
-      method,
+    const response = await fetch("/api/tasks", {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
@@ -444,7 +769,62 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
     onOpenChange(false);
   }
 
+  async function onCommentSubmit() {
+    setCommentsError(null);
+
+    if (mode !== "edit" || !task) {
+      setCommentsError("Task details are unavailable");
+      return;
+    }
+
+    const normalizedBody = commentBody.trim();
+    if (!normalizedBody) {
+      return;
+    }
+
+    setCommentSaving(true);
+
+    const response = await fetch(`/api/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        body: normalizedBody,
+      }),
+    });
+
+    setCommentSaving(false);
+
+    if (!response.ok) {
+      setCommentsError(await readErrorMessage(response));
+      return;
+    }
+
+    const payload = await response.json().catch(() => null);
+    if (!payload || !Number.isInteger(Number(payload.id)) || Number(payload.id) <= 0) {
+      setCommentsError("Comment response was invalid");
+      return;
+    }
+
+    const createdComment: TaskCommentItem = {
+      id: Number(payload.id),
+      authorName: typeof payload.authorName === "string" ? payload.authorName : "Unknown user",
+      body: typeof payload.body === "string" ? payload.body : normalizedBody,
+      createdAt: typeof payload.createdAt === "string" ? payload.createdAt : new Date().toISOString(),
+      updatedAt: typeof payload.updatedAt === "string" ? payload.updatedAt : new Date().toISOString(),
+    };
+
+    setCommentItems((current) => [...current, createdComment]);
+    setCommentBody("");
+    void loadTaskComments(task.id, { background: true });
+  }
+
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
+    if (mode !== "create") {
+      return;
+    }
+
     if (event.key !== "Enter") {
       return;
     }
@@ -469,7 +849,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
       : "Update details while keeping the task list in view.";
 
   return (
-    <Drawer direction="right" open={open} onOpenChange={onOpenChange}>
+    <Drawer direction="right" open={open} onOpenChange={onOpenChange} handleOnly>
       <DrawerContent className="gap-0 overflow-hidden border-border/80 p-0 shadow-xl data-[vaul-drawer-direction=right]:w-[640px] data-[vaul-drawer-direction=right]:max-w-[95vw]">
         <DrawerHeader className="gap-1 border-b border-border/60 px-5 pb-4 pt-4 text-left">
           <div className="flex items-start justify-between gap-3">
@@ -515,7 +895,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-5 pt-4">
             <section className="space-y-3.5">
               <div className="grid grid-cols-1 gap-3">
-                <div className="space-y-1.5">
+                <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5">
                   <Label htmlFor="task-assignee">Assignee</Label>
                   <Select value={assigneeId} onValueChange={setAssigneeId}>
                     <SelectTrigger id="task-assignee" className="h-9 border-border/70 bg-background">
@@ -523,7 +903,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {(assigneeOptions ?? []).map((option) => (
+                      {resolvedAssigneeOptions.map((option) => (
                         <SelectItem key={option.id} value={option.id}>
                           {option.label}
                         </SelectItem>
@@ -531,24 +911,51 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
                     </SelectContent>
                   </Select>
                   {assigneeOptions === null ? (
-                    <p className="text-[11px] text-muted-foreground">Loading assignees...</p>
+                    <p className="col-start-2 text-[11px] text-muted-foreground">Loading assignees...</p>
                   ) : null}
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5">
                   <Label htmlFor="task-due-date">Due date</Label>
-                  <Input
-                    id="task-due-date"
-                    type="date"
-                    value={dueDate}
-                    onChange={(event) => setDueDate(event.target.value)}
-                    className="h-9 border-border/70 bg-background shadow-none"
-                  />
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                    <Input
+                      id="task-due-date"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="DD/MM/YYYY"
+                      value={dueDate}
+                      onChange={(event) => setDueDate(event.target.value)}
+                      className="h-9 border-border/70 bg-background shadow-none"
+                    />
+                    <Popover open={dueDatePickerOpen} onOpenChange={setDueDatePickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon-sm"
+                          className="h-9 w-9 border-border/70 bg-background"
+                          aria-label="Open due date picker"
+                        >
+                          <CalendarDays className="size-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="end">
+                        <Calendar
+                          mode="single"
+                          selected={parseDateInputValue(dueDate) ?? undefined}
+                          onSelect={(date) => {
+                            setDueDate(date ? formatDateForInput(date) : "");
+                            setDueDatePickerOpen(false);
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
+                <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5">
                   <Label htmlFor="task-priority">Priority</Label>
                   <Select
                     value={priority}
@@ -567,7 +974,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
                   </Select>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5">
                   <Label htmlFor="task-status">Status</Label>
                   <Select value={status} onValueChange={(value) => setStatus(value as StatusValue)}>
                     <SelectTrigger id="task-status" className="h-9 border-border/70 bg-background">
@@ -627,9 +1034,73 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
                 </TabsList>
 
                 <TabsContent value="comments" className="mt-0">
-                  <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
-                    Comments are separate from system activity and will appear here.
-                  </div>
+                  {mode !== "edit" || !task ? (
+                    <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
+                      Create the task to start comments.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="space-y-2 rounded-md border border-border/70 bg-muted/10 p-3">
+                        <Label htmlFor="task-comment-body" className="text-xs text-muted-foreground">
+                          Add comment
+                        </Label>
+                        <Textarea
+                          id="task-comment-body"
+                          value={commentBody}
+                          onChange={(event) => setCommentBody(event.target.value)}
+                          placeholder="Write a comment..."
+                          rows={3}
+                          className="min-h-24 resize-y border-border/70 bg-background shadow-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          {commentSaving ? (
+                            <p className="text-xs text-muted-foreground">Saving comment...</p>
+                          ) : null}
+                          <Button
+                            type="button"
+                            onClick={onCommentSubmit}
+                            disabled={commentSaving || normalizedCommentBody.length === 0}
+                            className="h-8 px-3"
+                          >
+                            {commentSaving ? "Commenting..." : "Comment"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {commentsError ? (
+                        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                          {commentsError}
+                        </div>
+                      ) : null}
+
+                      {commentsLoading ? (
+                        <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
+                          Loading comments...
+                        </div>
+                      ) : commentItems.length === 0 ? (
+                        <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
+                          No comments yet.
+                        </div>
+                      ) : (
+                        <ol className="space-y-2.5">
+                          {commentItems.map((comment) => (
+                            <li
+                              key={comment.id}
+                              className="rounded-md border border-border/70 bg-background px-3 py-2.5"
+                            >
+                              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <p className="text-sm font-medium text-foreground">{comment.authorName}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatActivityTimestamp(comment.createdAt)}
+                                </p>
+                              </div>
+                              <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{comment.body}</p>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="activity" className="mt-0">
@@ -679,12 +1150,19 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
           </div>
 
           <DrawerFooter className="flex-row justify-end gap-2 border-t border-border/70 bg-muted/5 px-5 py-3.5">
+            {mode === "edit" ? (
+              <p className="mr-auto text-xs text-muted-foreground">
+                {saving ? "Saving changes..." : "Changes are saved automatically"}
+              </p>
+            ) : null}
             <Button type="button" variant="outline" className="min-w-[92px]" onClick={() => onOpenChange(false)}>
-              Cancel
+              Close
             </Button>
-            <Button type="submit" disabled={saving} className="min-w-[124px]">
-              {saving ? (mode === "create" ? "Creating..." : "Saving...") : mode === "create" ? "Create task" : "Save changes"}
-            </Button>
+            {mode === "create" ? (
+              <Button type="submit" disabled={saving} className="min-w-[124px]">
+                {saving ? "Creating..." : "Create task"}
+              </Button>
+            ) : null}
           </DrawerFooter>
         </form>
       </DrawerContent>

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useState } from "react";
-import { CircleAlert, Search, X } from "lucide-react";
+import { CircleAlert, Plus, Search, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -211,29 +211,40 @@ export function ManageProjectsContent({
               </p>
             </div>
 
-            <div className="relative w-full sm:w-72">
-              <label htmlFor="project-search" className="sr-only">
-                Search projects
-              </label>
-              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                id="project-search"
-                type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search projects"
-                className="h-9 rounded-md border-border/60 bg-muted/30 pl-9 pr-10 text-sm shadow-none focus:bg-background"
-              />
-              {searchQuery ? (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
-                  aria-label="Clear search"
-                >
-                  <X className="size-4" />
-                </button>
-              ) : null}
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <Button
+                type="button"
+                className="h-9 whitespace-nowrap"
+                onClick={() => onAddProjectOpenChange(true)}
+              >
+                <Plus className="size-4" />
+                Create project
+              </Button>
+
+              <div className="relative w-full sm:w-72">
+                <label htmlFor="project-search" className="sr-only">
+                  Search projects
+                </label>
+                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="project-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search projects"
+                  className="h-9 rounded-md border-border/60 bg-muted/30 pl-9 pr-10 text-sm shadow-none focus:bg-background"
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
+                    aria-label="Clear search"
+                  >
+                    <X className="size-4" />
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
 

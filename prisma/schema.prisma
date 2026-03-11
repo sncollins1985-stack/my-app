@@ -25,6 +25,7 @@ model AuthUser {
   passwordResetTokens PasswordResetToken[]
   createdTasks        Task[]               @relation("TaskCreator")
   taskActivities      TaskActivity[]
+  taskComments        TaskComment[]
 }
 model Session {
   id        Int      @id @default(autoincrement())
@@ -104,11 +105,26 @@ model Task {
   createdByAuthUser   AuthUser     @relation("TaskCreator", fields: [createdByAuthUserId], references: [id], onDelete: Restrict)
   createdByEmail      String
   activities          TaskActivity[]
+  comments            TaskComment[]
 
   @@index([createdAt])
   @@index([projectId, createdAt])
   @@index([assigneeId, createdAt])
   @@index([createdByAuthUserId, createdAt])
+}
+
+model TaskComment {
+  id           Int      @id @default(autoincrement())
+  taskId       Int
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorUserId Int
+  authorUser   AuthUser @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+  body         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([taskId, createdAt])
+  @@index([authorUserId, createdAt])
 }
 
 model TaskActivity {
