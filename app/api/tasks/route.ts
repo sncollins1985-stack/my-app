@@ -2,23 +2,11 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { parseOptionalEntityIdentifier } from "@/lib/entity-id";
 import { insertTaskActivitiesBestEffort } from "@/lib/task-activity";
 
 type TaskPriorityValue = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type TaskStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "BLOCKED" | "DONE";
-type TaskRecord = {
-  id: number;
-  title: string;
-  description: string | null;
-  assigneeId: number | null;
-  dueDate: Date | string | null;
-  priority: TaskPriorityValue;
-  status: TaskStatusValue;
-  projectId: number | null;
-  createdAt: Date | string;
-  createdByAuthUserId: number;
-  createdByEmail: string;
-};
 
 const PRIORITY_MAP: Record<string, TaskPriorityValue> = {
   low: "LOW",
@@ -33,55 +21,6 @@ const STATUS_MAP: Record<string, TaskStatusValue> = {
   blocked: "BLOCKED",
   done: "DONE",
 };
-
-type TaskDelegateLike = {
-  findMany: (args: {
-    where: { projectId?: number };
-    orderBy: { createdAt: "desc" };
-  }) => Promise<TaskRecord[]>;
-  create: (args: {
-    data: {
-      title: string;
-      description: string | null;
-      assigneeId: number | null;
-      dueDate: Date | null;
-      priority: TaskPriorityValue;
-      status: TaskStatusValue;
-      projectId: number | null;
-      createdByAuthUserId: number;
-      createdByEmail: string;
-    };
-  }) => Promise<TaskRecord>;
-};
-
-function getTaskDelegateFromClient(client: unknown): TaskDelegateLike | null {
-  const typedClient = client as { task?: TaskDelegateLike };
-  return typedClient.task ?? null;
-}
-
-function getTaskDelegate(): TaskDelegateLike | null {
-  const client = prisma as unknown;
-  return getTaskDelegateFromClient(client);
-}
-
-function parseOptionalPositiveInt(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const numericValue =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value)
-        : Number.NaN;
-
-  if (!Number.isInteger(numericValue) || numericValue <= 0) {
-    return Number.NaN;
-  }
-
-  return numericValue;
-}
 
 function parseDueDate(value: unknown) {
   if (value === null || value === undefined || value === "") {
@@ -125,6 +64,10 @@ function parseDueDate(value: unknown) {
   return parsedDate;
 }
 
+function identifierError(fieldName: string) {
+  return `${fieldName} must be a UUID or positive integer`;
+}
+
 // GET /api/tasks -> list tasks (AUTH REQUIRED)
 export async function GET(request: Request) {
   try {
@@ -134,35 +77,20 @@ export async function GET(request: Request) {
     }
 
     const url = new URL(request.url);
-    const projectId = parseOptionalPositiveInt(url.searchParams.get("projectId"));
-
-    if (Number.isNaN(projectId)) {
-      return NextResponse.json(
-        { error: "projectId must be a positive integer" },
-        { status: 400 }
-      );
+    const projectIdentifier = parseOptionalEntityIdentifier(url.searchParams.get("projectId"));
+    if (projectIdentifier === "invalid") {
+      return NextResponse.json({ error: identifierError("projectId") }, { status: 400 });
     }
 
-    const taskDelegate = getTaskDelegate();
-    const tasks = taskDelegate
-      ? await taskDelegate.findMany({
-          where: {
-            projectId: projectId ?? undefined,
-          },
-          orderBy: { createdAt: "desc" },
-        })
-      : projectId !== null
-        ? await prisma.$queryRaw<TaskRecord[]>`
-            SELECT *
-            FROM "Task"
-            WHERE "projectId" = ${projectId}
-            ORDER BY "createdAt" DESC
-          `
-        : await prisma.$queryRaw<TaskRecord[]>`
-            SELECT *
-            FROM "Task"
-            ORDER BY "createdAt" DESC
-          `;
+    const tasks = await prisma.task.findMany({
+      where:
+        projectIdentifier === null
+          ? undefined
+          : projectIdentifier.kind === "uuid"
+            ? { projectUuid: projectIdentifier.uuid }
+            : { projectId: projectIdentifier.id },
+      orderBy: { createdAt: "desc" },
+    });
 
     return NextResponse.json(tasks);
   } catch (error) {
@@ -195,20 +123,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "title is required" }, { status: 400 });
     }
 
-    const assigneeId = parseOptionalPositiveInt(body.assigneeId);
-    if (Number.isNaN(assigneeId)) {
-      return NextResponse.json(
-        { error: "assigneeId must be a positive integer" },
-        { status: 400 }
-      );
+    const assigneeIdentifier = parseOptionalEntityIdentifier(body.assigneeId);
+    if (assigneeIdentifier === "invalid") {
+      return NextResponse.json({ error: identifierError("assigneeId") }, { status: 400 });
     }
 
-    const projectId = parseOptionalPositiveInt(body.projectId);
-    if (Number.isNaN(projectId)) {
-      return NextResponse.json(
-        { error: "projectId must be a positive integer" },
-        { status: 400 }
-      );
+    const projectIdentifier = parseOptionalEntityIdentifier(body.projectId);
+    if (projectIdentifier === "invalid") {
+      return NextResponse.json({ error: identifierError("projectId") }, { status: 400 });
     }
 
     const dueDate = parseDueDate(body.dueDate);
@@ -237,87 +159,58 @@ export async function POST(request: Request) {
       );
     }
 
-    if (assigneeId !== null) {
-      const assignee = await prisma.user.findUnique({
-        where: { id: assigneeId },
-        select: { id: true },
-      });
-
-      if (!assignee) {
-        return NextResponse.json({ error: "assignee was not found" }, { status: 400 });
-      }
+    const assignee =
+      assigneeIdentifier === null
+        ? null
+        : await prisma.user.findUnique({
+            where:
+              assigneeIdentifier.kind === "uuid"
+                ? { uuid: assigneeIdentifier.uuid }
+                : { id: assigneeIdentifier.id },
+            select: { id: true, uuid: true },
+          });
+    if (assigneeIdentifier !== null && !assignee) {
+      return NextResponse.json({ error: "assignee was not found" }, { status: 400 });
     }
 
-    if (projectId !== null) {
-      const project = await prisma.project.findUnique({
-        where: { id: projectId },
-        select: { id: true },
-      });
-
-      if (!project) {
-        return NextResponse.json({ error: "project was not found" }, { status: 400 });
-      }
+    const project =
+      projectIdentifier === null
+        ? null
+        : await prisma.project.findUnique({
+            where:
+              projectIdentifier.kind === "uuid"
+                ? { uuid: projectIdentifier.uuid }
+                : { id: projectIdentifier.id },
+            select: { id: true, uuid: true },
+          });
+    if (projectIdentifier !== null && !project) {
+      return NextResponse.json({ error: "project was not found" }, { status: 400 });
     }
 
     const task = await prisma.$transaction(async (transaction) => {
-      const transactionTaskDelegate = getTaskDelegateFromClient(transaction as unknown);
-      const createdTask = transactionTaskDelegate
-        ? await transactionTaskDelegate.create({
-            data: {
-              title,
-              description,
-              assigneeId,
-              dueDate: dueDate ?? null,
-              priority,
-              status,
-              projectId,
-              createdByAuthUserId: authUser.id,
-              createdByEmail: authUser.email,
-            },
-          })
-        : await (async () => {
-            await transaction.$executeRaw`
-              INSERT INTO "Task" (
-                "title",
-                "description",
-                "assigneeId",
-                "dueDate",
-                "priority",
-                "status",
-                "projectId",
-                "createdByAuthUserId",
-                "createdByEmail"
-              )
-              VALUES (
-                ${title},
-                ${description},
-                ${assigneeId},
-                ${dueDate ? dueDate.toISOString() : null},
-                ${priority},
-                ${status},
-                ${projectId},
-                ${authUser.id},
-                ${authUser.email}
-              )
-            `;
-
-            const rows = await transaction.$queryRaw<TaskRecord[]>`
-              SELECT *
-              FROM "Task"
-              WHERE "id" = last_insert_rowid()
-            `;
-
-            if (!rows[0]) {
-              throw new Error("Task insert failed");
-            }
-
-            return rows[0];
-          })();
+      const createdTask = await transaction.task.create({
+        data: {
+          title,
+          description,
+          assigneeId: assignee?.id ?? null,
+          assigneeUuid: assignee?.uuid ?? null,
+          dueDate: dueDate ?? null,
+          priority,
+          status,
+          projectId: project?.id ?? null,
+          projectUuid: project?.uuid ?? null,
+          createdByAuthUserId: authUser.id,
+          createdByAuthUserUuid: authUser.uuid,
+          createdByEmail: authUser.email,
+        },
+      });
 
       await insertTaskActivitiesBestEffort(transaction, [
         {
           taskId: createdTask.id,
+          taskUuid: createdTask.uuid,
           userId: authUser.id,
+          userUuid: authUser.uuid,
           actionType: "CREATED",
           field: null,
           oldValue: null,

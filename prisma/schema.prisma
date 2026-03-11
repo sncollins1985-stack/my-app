@@ -8,55 +8,75 @@ datasource db {
 }
 
 model User {
-  id           Int       @id @default(autoincrement())
-  email        String    @unique
-  firstName    String?
-  lastName     String?
-  lastLoggedIn DateTime?
-  createdAt    DateTime  @default(now())
-  assignedTasks Task[]   @relation("TaskAssignee")
+  id                  Int       @id @default(autoincrement())
+  uuid                String    @unique @default(uuid())
+  email               String    @unique
+  firstName           String?
+  lastName            String?
+  lastLoggedIn        DateTime?
+  createdAt           DateTime  @default(now())
+  assignedTasks       Task[]    @relation("TaskAssigneeById")
+  assignedTasksByUuid Task[]    @relation("TaskAssigneeByUuid")
 }
+
 model AuthUser {
-  id                  Int                  @id @default(autoincrement())
-  email               String               @unique
-  passwordHash        String
-  createdAt           DateTime             @default(now())
-  sessions            Session[]
-  passwordResetTokens PasswordResetToken[]
-  createdTasks        Task[]               @relation("TaskCreator")
-  taskActivities      TaskActivity[]
-  taskComments        TaskComment[]
+  id                        Int                  @id @default(autoincrement())
+  uuid                      String               @unique @default(uuid())
+  email                     String               @unique
+  passwordHash              String
+  createdAt                 DateTime             @default(now())
+  sessions                  Session[]            @relation("SessionUserById")
+  sessionsByUuid            Session[]            @relation("SessionUserByUuid")
+  passwordResetTokens       PasswordResetToken[] @relation("PasswordResetTokenUserById")
+  passwordResetTokensByUuid PasswordResetToken[] @relation("PasswordResetTokenUserByUuid")
+  createdTasks              Task[]               @relation("TaskCreatorById")
+  createdTasksByUuid        Task[]               @relation("TaskCreatorByUuid")
+  taskActivities            TaskActivity[]       @relation("TaskActivityUserById")
+  taskActivitiesByUuid      TaskActivity[]       @relation("TaskActivityUserByUuid")
+  taskComments              TaskComment[]        @relation("TaskCommentAuthorById")
+  taskCommentsByUuid        TaskComment[]        @relation("TaskCommentAuthorByUuid")
 }
+
 model Session {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique
-  userId    Int
-  user      AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  uuid       String   @unique @default(uuid())
+  token      String   @unique
+  userId     Int
+  user       AuthUser @relation("SessionUserById", fields: [userId], references: [id], onDelete: Cascade)
+  userUuid   String
+  userByUuid AuthUser @relation("SessionUserByUuid", fields: [userUuid], references: [uuid], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
 
   @@index([userId])
+  @@index([userUuid])
 }
 
 model PasswordResetToken {
-  id         Int       @id @default(autoincrement())
-  authUserId Int
-  authUser   AuthUser  @relation(fields: [authUserId], references: [id], onDelete: Cascade)
-  tokenHash  String    @unique
-  expiresAt  DateTime
-  usedAt     DateTime?
-  createdAt  DateTime  @default(now())
+  id             Int       @id @default(autoincrement())
+  uuid           String    @unique @default(uuid())
+  authUserId     Int
+  authUser       AuthUser  @relation("PasswordResetTokenUserById", fields: [authUserId], references: [id], onDelete: Cascade)
+  authUserUuid   String
+  authUserByUuid AuthUser  @relation("PasswordResetTokenUserByUuid", fields: [authUserUuid], references: [uuid], onDelete: Cascade)
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime  @default(now())
 
   @@index([authUserId])
+  @@index([authUserUuid])
   @@index([expiresAt])
 }
 
 model Project {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
+  uuid        String   @unique @default(uuid())
   name        String
   description String?
-  createdAt   DateTime  @default(now())
-  tasks       Task[]
+  createdAt   DateTime @default(now())
+  tasks       Task[]   @relation("TaskProjectById")
+  tasksByUuid Task[]   @relation("TaskProjectByUuid")
 
   @@index([createdAt])
 }
@@ -90,49 +110,73 @@ enum TaskActivityField {
 }
 
 model Task {
-  id                  Int          @id @default(autoincrement())
-  title               String
-  description         String?
-  assigneeId          Int?
-  assignee            User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  dueDate             DateTime?
-  priority            TaskPriority @default(MEDIUM)
-  status              TaskStatus   @default(NOT_STARTED)
-  projectId           Int?
-  project             Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  createdAt           DateTime     @default(now())
-  createdByAuthUserId Int
-  createdByAuthUser   AuthUser     @relation("TaskCreator", fields: [createdByAuthUserId], references: [id], onDelete: Restrict)
-  createdByEmail      String
-  activities          TaskActivity[]
-  comments            TaskComment[]
+  id                      Int            @id @default(autoincrement())
+  uuid                    String         @unique @default(uuid())
+  title                   String
+  description             String?
+  assigneeId              Int?
+  assignee                User?          @relation("TaskAssigneeById", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assigneeUuid            String?
+  assigneeByUuid          User?          @relation("TaskAssigneeByUuid", fields: [assigneeUuid], references: [uuid], onDelete: SetNull)
+  dueDate                 DateTime?
+  priority                TaskPriority   @default(MEDIUM)
+  status                  TaskStatus     @default(NOT_STARTED)
+  projectId               Int?
+  project                 Project?       @relation("TaskProjectById", fields: [projectId], references: [id], onDelete: SetNull)
+  projectUuid             String?
+  projectByUuid           Project?       @relation("TaskProjectByUuid", fields: [projectUuid], references: [uuid], onDelete: SetNull)
+  createdAt               DateTime       @default(now())
+  createdByAuthUserId     Int
+  createdByAuthUser       AuthUser       @relation("TaskCreatorById", fields: [createdByAuthUserId], references: [id], onDelete: Restrict)
+  createdByAuthUserUuid   String
+  createdByAuthUserByUuid AuthUser       @relation("TaskCreatorByUuid", fields: [createdByAuthUserUuid], references: [uuid], onDelete: Restrict)
+  createdByEmail          String
+  activities              TaskActivity[] @relation("TaskActivityTaskById")
+  activitiesByUuid        TaskActivity[] @relation("TaskActivityTaskByUuid")
+  comments                TaskComment[]  @relation("TaskCommentTaskById")
+  commentsByUuid          TaskComment[]  @relation("TaskCommentTaskByUuid")
 
   @@index([createdAt])
   @@index([projectId, createdAt])
+  @@index([projectUuid, createdAt])
   @@index([assigneeId, createdAt])
+  @@index([assigneeUuid, createdAt])
   @@index([createdByAuthUserId, createdAt])
+  @@index([createdByAuthUserUuid, createdAt])
 }
 
 model TaskComment {
-  id           Int      @id @default(autoincrement())
-  taskId       Int
-  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  authorUserId Int
-  authorUser   AuthUser @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
-  body         String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               Int      @id @default(autoincrement())
+  uuid             String   @unique @default(uuid())
+  taskId           Int
+  task             Task     @relation("TaskCommentTaskById", fields: [taskId], references: [id], onDelete: Cascade)
+  taskUuid         String
+  taskByUuid       Task     @relation("TaskCommentTaskByUuid", fields: [taskUuid], references: [uuid], onDelete: Cascade)
+  authorUserId     Int
+  authorUser       AuthUser @relation("TaskCommentAuthorById", fields: [authorUserId], references: [id], onDelete: Restrict)
+  authorUserUuid   String
+  authorUserByUuid AuthUser @relation("TaskCommentAuthorByUuid", fields: [authorUserUuid], references: [uuid], onDelete: Restrict)
+  body             String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@index([taskId, createdAt])
+  @@index([taskUuid, createdAt])
   @@index([authorUserId, createdAt])
+  @@index([authorUserUuid, createdAt])
 }
 
 model TaskActivity {
   id         Int                    @id @default(autoincrement())
+  uuid       String                 @unique @default(uuid())
   taskId     Int
-  task       Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task       Task                   @relation("TaskActivityTaskById", fields: [taskId], references: [id], onDelete: Cascade)
+  taskUuid   String
+  taskByUuid Task                   @relation("TaskActivityTaskByUuid", fields: [taskUuid], references: [uuid], onDelete: Cascade)
   userId     Int
-  user       AuthUser               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user       AuthUser               @relation("TaskActivityUserById", fields: [userId], references: [id], onDelete: Restrict)
+  userUuid   String
+  userByUuid AuthUser               @relation("TaskActivityUserByUuid", fields: [userUuid], references: [uuid], onDelete: Restrict)
   actionType TaskActivityActionType
   field      TaskActivityField?
   oldValue   String?
@@ -140,7 +184,9 @@ model TaskActivity {
   createdAt  DateTime               @default(now())
 
   @@index([taskId, createdAt])
+  @@index([taskUuid, createdAt])
   @@index([userId, createdAt])
+  @@index([userUuid, createdAt])
 }
 
 model OutboundEmail {

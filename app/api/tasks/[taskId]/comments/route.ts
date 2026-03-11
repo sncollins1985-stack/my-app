@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { parseEntityIdentifier } from "@/lib/entity-id";
 
 type TaskCommentRow = {
   id: number;
@@ -17,15 +18,6 @@ interface TaskCommentsRouteParams {
   params: Promise<{
     taskId: string;
   }>;
-}
-
-function parseRequiredPositiveInt(value: string) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return Number.NaN;
-  }
-
-  return parsed;
 }
 
 function serializeDate(value: Date | string) {
@@ -77,7 +69,7 @@ function isMissingTaskCommentTableError(error: unknown) {
     details.includes("no such table") ||
     details.includes("does not exist") ||
     details.includes("invalid object name") ||
-    details.includes("table") && details.includes("not found")
+    (details.includes("table") && details.includes("not found"))
   );
 }
 
@@ -90,26 +82,46 @@ export async function GET(_request: Request, { params }: TaskCommentsRouteParams
     }
 
     const resolvedParams = await params;
-    const taskId = parseRequiredPositiveInt(resolvedParams.taskId);
-    if (Number.isNaN(taskId)) {
-      return NextResponse.json({ error: "taskId must be a positive integer" }, { status: 400 });
+    const taskIdentifier = parseEntityIdentifier(resolvedParams.taskId);
+    if (!taskIdentifier) {
+      return NextResponse.json(
+        { error: "taskId must be a UUID or positive integer" },
+        { status: 400 }
+      );
     }
 
-    const rows = await prisma.$queryRaw<TaskCommentRow[]>`
-      SELECT
-        tc."id",
-        tc."body",
-        tc."createdAt",
-        tc."updatedAt",
-        au."email" AS "authorEmail",
-        u."firstName" AS "authorFirstName",
-        u."lastName" AS "authorLastName"
-      FROM "TaskComment" tc
-      INNER JOIN "AuthUser" au ON au."id" = tc."authorUserId"
-      LEFT JOIN "User" u ON u."email" = au."email"
-      WHERE tc."taskId" = ${taskId}
-      ORDER BY tc."createdAt" ASC, tc."id" ASC
-    `;
+    const rows =
+      taskIdentifier.kind === "uuid"
+        ? await prisma.$queryRaw<TaskCommentRow[]>`
+            SELECT
+              tc."id",
+              tc."body",
+              tc."createdAt",
+              tc."updatedAt",
+              au."email" AS "authorEmail",
+              u."firstName" AS "authorFirstName",
+              u."lastName" AS "authorLastName"
+            FROM "TaskComment" tc
+            INNER JOIN "AuthUser" au ON au."id" = tc."authorUserId"
+            LEFT JOIN "User" u ON u."email" = au."email"
+            WHERE tc."taskUuid" = ${taskIdentifier.uuid}
+            ORDER BY tc."createdAt" ASC, tc."id" ASC
+          `
+        : await prisma.$queryRaw<TaskCommentRow[]>`
+            SELECT
+              tc."id",
+              tc."body",
+              tc."createdAt",
+              tc."updatedAt",
+              au."email" AS "authorEmail",
+              u."firstName" AS "authorFirstName",
+              u."lastName" AS "authorLastName"
+            FROM "TaskComment" tc
+            INNER JOIN "AuthUser" au ON au."id" = tc."authorUserId"
+            LEFT JOIN "User" u ON u."email" = au."email"
+            WHERE tc."taskId" = ${taskIdentifier.id}
+            ORDER BY tc."createdAt" ASC, tc."id" ASC
+          `;
 
     return NextResponse.json(rows.map(serializeComment));
   } catch (error) {
@@ -131,9 +143,12 @@ export async function POST(request: Request, { params }: TaskCommentsRouteParams
     }
 
     const resolvedParams = await params;
-    const taskId = parseRequiredPositiveInt(resolvedParams.taskId);
-    if (Number.isNaN(taskId)) {
-      return NextResponse.json({ error: "taskId must be a positive integer" }, { status: 400 });
+    const taskIdentifier = parseEntityIdentifier(resolvedParams.taskId);
+    if (!taskIdentifier) {
+      return NextResponse.json(
+        { error: "taskId must be a UUID or positive integer" },
+        { status: 400 }
+      );
     }
 
     const body = await request.json().catch(() => ({}));
@@ -142,26 +157,31 @@ export async function POST(request: Request, { params }: TaskCommentsRouteParams
       return NextResponse.json({ error: "body is required" }, { status: 400 });
     }
 
-    const createdComment = await prisma.$transaction(async (transaction) => {
-      const taskRows = await transaction.$queryRaw<{ id: number }[]>`
-        SELECT "id"
-        FROM "Task"
-        WHERE "id" = ${taskId}
-        LIMIT 1
-      `;
-      if (!taskRows[0]) {
-        return { missingTask: true as const, comment: null };
-      }
+    const task = await prisma.task.findUnique({
+      where:
+        taskIdentifier.kind === "uuid"
+          ? { uuid: taskIdentifier.uuid }
+          : { id: taskIdentifier.id },
+      select: { id: true, uuid: true },
+    });
+    if (!task) {
+      return NextResponse.json({ error: "Task was not found" }, { status: 404 });
+    }
 
+    const createdComment = await prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw`
         INSERT INTO "TaskComment" (
           "taskId",
+          "taskUuid",
           "authorUserId",
+          "authorUserUuid",
           "body"
         )
         VALUES (
-          ${taskId},
+          ${task.id},
+          ${task.uuid},
           ${authUser.id},
+          ${authUser.uuid},
           ${commentBody}
         )
       `;
@@ -186,14 +206,10 @@ export async function POST(request: Request, { params }: TaskCommentsRouteParams
         throw new Error("Task comment insert failed");
       }
 
-      return { missingTask: false as const, comment: rows[0] };
+      return rows[0];
     });
 
-    if (createdComment.missingTask || !createdComment.comment) {
-      return NextResponse.json({ error: "Task was not found" }, { status: 404 });
-    }
-
-    return NextResponse.json(serializeComment(createdComment.comment), { status: 201 });
+    return NextResponse.json(serializeComment(createdComment), { status: 201 });
   } catch (error) {
     if (isMissingTaskCommentTableError(error)) {
       return NextResponse.json(

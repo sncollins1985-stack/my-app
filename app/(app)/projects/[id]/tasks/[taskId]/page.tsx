@@ -1,74 +1,39 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaModelHasField } from "@/lib/prisma";
+import { EntityIdentifier, parseEntityIdentifier } from "@/lib/entity-id";
+import { getRouteId } from "@/lib/route-id";
 
 type TaskPriorityValue = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type TaskStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "BLOCKED" | "DONE";
 
 type TaskDetailRecord = {
-  id: number;
+  id: string;
   title: string;
   description: string | null;
-  assigneeId: number | null;
+  assigneeId: string | null;
   assigneeEmail: string | null;
   assigneeFirstName: string | null;
   assigneeLastName: string | null;
-  dueDate: Date | string | null;
+  dueDate: Date | null;
   priority: TaskPriorityValue;
   status: TaskStatusValue;
-  projectId: number | null;
-  createdAt: Date | string;
+  projectId: string | null;
+  createdAt: Date;
   createdByEmail: string;
 };
 
-type TaskDelegateLike = {
-  findFirst: (args: {
-    where: { id: number; projectId: number };
-    include: {
-      assignee: {
-        select: { id: true; email: true; firstName: true; lastName: true };
-      };
-    };
-  }) => Promise<
-    | {
-        id: number;
-        title: string;
-        description: string | null;
-        assigneeId: number | null;
-        dueDate: Date | null;
-        priority: TaskPriorityValue;
-        status: TaskStatusValue;
-        projectId: number | null;
-        createdAt: Date;
-        createdByEmail: string;
-        assignee: {
-          id: number;
-          email: string;
-          firstName: string | null;
-          lastName: string | null;
-        } | null;
-      }
-    | null
-  >;
-};
-
-function getTaskDelegate() {
-  const client = prisma as unknown as { task?: TaskDelegateLike };
-  return client.task ?? null;
-}
-
-function formatDate(value: Date | string | null) {
+function formatDate(value: Date | null) {
   if (!value) {
     return "Not set";
   }
 
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  if (Number.isNaN(value.getTime())) {
     return String(value);
   }
 
-  return date.toLocaleString("en-GB", {
+  return value.toLocaleString("en-GB", {
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -123,61 +88,44 @@ function formatAssignee(task: TaskDetailRecord) {
   return fullName || task.assigneeEmail || "Assigned";
 }
 
-async function loadTask(projectId: number, taskId: number): Promise<TaskDetailRecord | null> {
-  const taskDelegate = getTaskDelegate();
-  if (taskDelegate) {
-    const task = await taskDelegate.findFirst({
-      where: { id: taskId, projectId },
-      include: {
-        assignee: {
-          select: { id: true, email: true, firstName: true, lastName: true },
-        },
-      },
-    });
-
-    if (!task) {
-      return null;
-    }
-
-    return {
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      assigneeId: task.assigneeId,
-      assigneeEmail: task.assignee?.email ?? null,
-      assigneeFirstName: task.assignee?.firstName ?? null,
-      assigneeLastName: task.assignee?.lastName ?? null,
-      dueDate: task.dueDate,
-      priority: task.priority,
-      status: task.status,
-      projectId: task.projectId,
-      createdAt: task.createdAt,
-      createdByEmail: task.createdByEmail,
-    };
+async function loadTask(
+  projectId: number,
+  taskIdentifier: EntityIdentifier
+): Promise<TaskDetailRecord | null> {
+  const supportsTaskUuid = prismaModelHasField("Task", "uuid");
+  if (taskIdentifier.kind === "uuid" && !supportsTaskUuid) {
+    return null;
   }
 
-  const rows = await prisma.$queryRaw<TaskDetailRecord[]>`
-    SELECT
-      t."id",
-      t."title",
-      t."description",
-      t."assigneeId",
-      u."email" AS "assigneeEmail",
-      u."firstName" AS "assigneeFirstName",
-      u."lastName" AS "assigneeLastName",
-      t."dueDate",
-      t."priority",
-      t."status",
-      t."projectId",
-      t."createdAt",
-      t."createdByEmail"
-    FROM "Task" t
-    LEFT JOIN "User" u ON u."id" = t."assigneeId"
-    WHERE t."id" = ${taskId} AND t."projectId" = ${projectId}
-    LIMIT 1
-  `;
+  const task = await prisma.task.findFirst({
+    where:
+      taskIdentifier.kind === "uuid"
+        ? { uuid: taskIdentifier.uuid, projectId }
+        : { id: taskIdentifier.id, projectId },
+    include: {
+      assignee: true,
+    },
+  });
 
-  return rows[0] ?? null;
+  if (!task) {
+    return null;
+  }
+
+  return {
+    id: getRouteId(task),
+    title: task.title,
+    description: task.description,
+    assigneeId: task.assignee ? getRouteId(task.assignee) : null,
+    assigneeEmail: task.assignee?.email ?? null,
+    assigneeFirstName: task.assignee?.firstName ?? null,
+    assigneeLastName: task.assignee?.lastName ?? null,
+    dueDate: task.dueDate,
+    priority: task.priority,
+    status: task.status,
+    projectId: task.projectId !== null ? String(task.projectId) : null,
+    createdAt: task.createdAt,
+    createdByEmail: task.createdByEmail,
+  };
 }
 
 interface ProjectTaskDetailPageProps {
@@ -189,23 +137,34 @@ interface ProjectTaskDetailPageProps {
 
 export default async function ProjectTaskDetailPage({ params }: ProjectTaskDetailPageProps) {
   const resolvedParams = await params;
-  const projectId = Number(resolvedParams.id);
-  const taskId = Number(resolvedParams.taskId);
+  const projectIdentifier = parseEntityIdentifier(resolvedParams.id);
+  const taskIdentifier = parseEntityIdentifier(resolvedParams.taskId);
 
-  if (!Number.isInteger(projectId) || projectId <= 0) {
+  if (!projectIdentifier || !taskIdentifier) {
     notFound();
   }
 
-  if (!Number.isInteger(taskId) || taskId <= 0) {
+  const supportsProjectUuid = prismaModelHasField("Project", "uuid");
+  if (projectIdentifier.kind === "uuid" && !supportsProjectUuid) {
     notFound();
   }
 
-  const task = await loadTask(projectId, taskId);
+  const project = await prisma.project.findUnique({
+    where:
+      projectIdentifier.kind === "uuid"
+        ? { uuid: projectIdentifier.uuid }
+        : { id: projectIdentifier.id },
+  });
+  if (!project) {
+    notFound();
+  }
+
+  const task = await loadTask(project.id, taskIdentifier);
   if (!task) {
     notFound();
   }
 
-  const projectPath = `/projects/${encodeURIComponent(String(projectId))}/tasks`;
+  const projectPath = `/projects/${encodeURIComponent(getRouteId(project))}/tasks`;
 
   return (
     <section className="rounded-xl border bg-card p-5 shadow-sm">

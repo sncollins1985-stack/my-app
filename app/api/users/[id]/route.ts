@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { parseEntityIdentifier } from "@/lib/entity-id";
 
 interface RouteContext {
   params: Promise<{
@@ -15,10 +16,9 @@ export async function PATCH(req: Request, context: RouteContext) {
   }
 
   const { id } = await context.params;
-  const userId = Number(id);
-
-  if (!Number.isInteger(userId)) {
-    return NextResponse.json({ error: "Invalid user id" }, { status: 400 });
+  const userIdentifier = parseEntityIdentifier(id);
+  if (!userIdentifier) {
+    return NextResponse.json({ error: "Invalid user id. Expected UUID or positive integer." }, { status: 400 });
   }
 
   const body = await req.json().catch(() => ({}));
@@ -27,7 +27,7 @@ export async function PATCH(req: Request, context: RouteContext) {
   const lastName = typeof body.lastName === "string" ? body.lastName.trim() : "";
 
   const updatedUser = await prisma.user.update({
-    where: { id: userId },
+    where: userIdentifier.kind === "uuid" ? { uuid: userIdentifier.uuid } : { id: userIdentifier.id },
     data: {
       firstName: firstName || null,
       lastName: lastName || null,

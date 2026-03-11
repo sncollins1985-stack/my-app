@@ -1,6 +1,7 @@
 import { AppHeader } from "@/components/app-header";
 import { prisma } from "@/lib/prisma";
 import { ManageProjectsContent } from "@/components/manage-projects-content";
+import { getRouteId } from "@/lib/route-id";
 
 interface ProjectsPageProps {
   searchParams: Promise<{ [key: string]: string | undefined }>;
@@ -22,7 +23,7 @@ export default async function ProjectsPage({ searchParams }: ProjectsPageProps) 
       <ManageProjectsContent
         openAddProject={openAddProject}
         initialProjects={projects.map((project) => ({
-          id: String(project.id),
+          id: getRouteId(project),
           name: project.name,
           description: project.description ?? "",
           createdAt: project.createdAt.toISOString(),

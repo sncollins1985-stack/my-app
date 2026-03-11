@@ -173,7 +173,10 @@ export function ManageProjectsContent({
 
     setProjects((current) => [
       {
-        id: String(createdProject.id ?? crypto.randomUUID()),
+        id:
+          typeof createdProject.uuid === "string" && createdProject.uuid.trim().length > 0
+            ? createdProject.uuid
+            : String(createdProject.id ?? crypto.randomUUID()),
         name: createdProjectName,
         description: createdProjectDescription,
         createdAt:

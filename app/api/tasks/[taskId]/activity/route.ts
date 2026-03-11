@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { parseEntityIdentifier } from "@/lib/entity-id";
 
 type TaskActivityActionType = "CREATED" | "FIELD_CHANGED";
 type TaskActivityField =
@@ -28,15 +29,6 @@ interface TaskActivityRouteParams {
   params: Promise<{
     taskId: string;
   }>;
-}
-
-function parseRequiredPositiveInt(value: string) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return Number.NaN;
-  }
-
-  return parsed;
 }
 
 function serializeDate(value: Date | string) {
@@ -78,7 +70,7 @@ function isMissingTaskActivityTableError(error: unknown) {
     details.includes("no such table") ||
     details.includes("does not exist") ||
     details.includes("invalid object name") ||
-    details.includes("table") && details.includes("not found")
+    (details.includes("table") && details.includes("not found"))
   );
 }
 
@@ -91,28 +83,50 @@ export async function GET(_request: Request, { params }: TaskActivityRouteParams
     }
 
     const resolvedParams = await params;
-    const taskId = parseRequiredPositiveInt(resolvedParams.taskId);
-    if (Number.isNaN(taskId)) {
-      return NextResponse.json({ error: "taskId must be a positive integer" }, { status: 400 });
+    const taskIdentifier = parseEntityIdentifier(resolvedParams.taskId);
+    if (!taskIdentifier) {
+      return NextResponse.json(
+        { error: "taskId must be a UUID or positive integer" },
+        { status: 400 }
+      );
     }
 
-    const rows = await prisma.$queryRaw<TaskActivityRow[]>`
-      SELECT
-        ta."id",
-        ta."actionType",
-        ta."field",
-        ta."oldValue",
-        ta."newValue",
-        ta."createdAt",
-        au."email" AS "userEmail",
-        u."firstName" AS "userFirstName",
-        u."lastName" AS "userLastName"
-      FROM "TaskActivity" ta
-      INNER JOIN "AuthUser" au ON au."id" = ta."userId"
-      LEFT JOIN "User" u ON u."email" = au."email"
-      WHERE ta."taskId" = ${taskId}
-      ORDER BY ta."createdAt" DESC, ta."id" DESC
-    `;
+    const rows =
+      taskIdentifier.kind === "uuid"
+        ? await prisma.$queryRaw<TaskActivityRow[]>`
+            SELECT
+              ta."id",
+              ta."actionType",
+              ta."field",
+              ta."oldValue",
+              ta."newValue",
+              ta."createdAt",
+              au."email" AS "userEmail",
+              u."firstName" AS "userFirstName",
+              u."lastName" AS "userLastName"
+            FROM "TaskActivity" ta
+            INNER JOIN "AuthUser" au ON au."id" = ta."userId"
+            LEFT JOIN "User" u ON u."email" = au."email"
+            WHERE ta."taskUuid" = ${taskIdentifier.uuid}
+            ORDER BY ta."createdAt" DESC, ta."id" DESC
+          `
+        : await prisma.$queryRaw<TaskActivityRow[]>`
+            SELECT
+              ta."id",
+              ta."actionType",
+              ta."field",
+              ta."oldValue",
+              ta."newValue",
+              ta."createdAt",
+              au."email" AS "userEmail",
+              u."firstName" AS "userFirstName",
+              u."lastName" AS "userLastName"
+            FROM "TaskActivity" ta
+            INNER JOIN "AuthUser" au ON au."id" = ta."userId"
+            LEFT JOIN "User" u ON u."email" = au."email"
+            WHERE ta."taskId" = ${taskIdentifier.id}
+            ORDER BY ta."createdAt" DESC, ta."id" DESC
+          `;
 
     return NextResponse.json(
       rows.map((row) => ({

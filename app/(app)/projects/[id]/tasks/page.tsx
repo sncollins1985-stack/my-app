@@ -1,117 +1,60 @@
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaModelHasField } from "@/lib/prisma";
 import { ProjectTasksGrid } from "@/components/project-tasks-grid";
+import { parseEntityIdentifier } from "@/lib/entity-id";
+import { getRouteId } from "@/lib/route-id";
 
 type TaskPriorityValue = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type TaskStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "BLOCKED" | "DONE";
 
 type TaskGridRow = {
-  id: number;
+  id: string;
   title: string;
   description: string | null;
-  assigneeId: number | null;
+  assigneeId: string | null;
   assigneeEmail: string | null;
   assigneeFirstName: string | null;
   assigneeLastName: string | null;
-  dueDate: Date | string | null;
+  dueDate: Date | null;
   priority: TaskPriorityValue;
   status: TaskStatusValue;
-  createdAt: Date | string;
+  createdAt: Date;
 };
 
-type TaskDelegateLike = {
-  findMany: (args: {
-    where: { projectId: number };
-    orderBy: { createdAt: "desc" };
-    include: {
-      assignee: {
-        select: { id: true; email: true; firstName: true; lastName: true };
-      };
-    };
-  }) => Promise<
-    Array<{
-      id: number;
-      title: string;
-      description: string | null;
-      assigneeId: number | null;
-      dueDate: Date | null;
-      priority: TaskPriorityValue;
-      status: TaskStatusValue;
-      createdAt: Date;
-      assignee: {
-        id: number;
-        email: string;
-        firstName: string | null;
-        lastName: string | null;
-      } | null;
-    }>
-  >;
-};
-
-function getTaskDelegate() {
-  const client = prisma as unknown as { task?: TaskDelegateLike };
-  return client.task ?? null;
-}
-
-function serializeDate(value: Date | string | null) {
+function serializeDate(value: Date | null) {
   if (!value) {
     return null;
   }
 
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  if (Number.isNaN(value.getTime())) {
     return String(value);
   }
 
-  return date.toISOString();
+  return value.toISOString();
 }
 
 async function loadProjectTasks(projectId: number): Promise<TaskGridRow[]> {
-  const taskDelegate = getTaskDelegate();
-  if (taskDelegate) {
-    const tasks = await taskDelegate.findMany({
-      where: { projectId },
-      orderBy: { createdAt: "desc" },
-      include: {
-        assignee: {
-          select: { id: true, email: true, firstName: true, lastName: true },
-        },
-      },
-    });
+  const tasks = await prisma.task.findMany({
+    where: { projectId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      assignee: true,
+    },
+  });
 
-    return tasks.map((task) => ({
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      assigneeId: task.assigneeId,
-      assigneeEmail: task.assignee?.email ?? null,
-      assigneeFirstName: task.assignee?.firstName ?? null,
-      assigneeLastName: task.assignee?.lastName ?? null,
-      dueDate: task.dueDate,
-      priority: task.priority,
-      status: task.status,
-      createdAt: task.createdAt,
-    }));
-  }
-
-  return prisma.$queryRaw<TaskGridRow[]>`
-    SELECT
-      t."id",
-      t."title",
-      t."description",
-      t."assigneeId",
-      u."email" AS "assigneeEmail",
-      u."firstName" AS "assigneeFirstName",
-      u."lastName" AS "assigneeLastName",
-      t."dueDate",
-      t."priority",
-      t."status",
-      t."createdAt"
-    FROM "Task" t
-    LEFT JOIN "User" u ON u."id" = t."assigneeId"
-    WHERE t."projectId" = ${projectId}
-    ORDER BY t."createdAt" DESC
-  `;
+  return tasks.map((task) => ({
+    id: getRouteId(task),
+    title: task.title,
+    description: task.description,
+    assigneeId: task.assignee ? getRouteId(task.assignee) : null,
+    assigneeEmail: task.assignee?.email ?? null,
+    assigneeFirstName: task.assignee?.firstName ?? null,
+    assigneeLastName: task.assignee?.lastName ?? null,
+    dueDate: task.dueDate,
+    priority: task.priority,
+    status: task.status,
+    createdAt: task.createdAt,
+  }));
 }
 
 interface ProjectTasksPageProps {
@@ -122,17 +65,32 @@ interface ProjectTasksPageProps {
 
 export default async function ProjectTasksPage({ params }: ProjectTasksPageProps) {
   const resolvedParams = await params;
-  const projectId = Number(resolvedParams.id);
-
-  if (!Number.isInteger(projectId) || projectId <= 0) {
+  const projectIdentifier = parseEntityIdentifier(resolvedParams.id);
+  if (!projectIdentifier) {
     notFound();
   }
 
-  const tasks = await loadProjectTasks(projectId);
+  const supportsProjectUuid = prismaModelHasField("Project", "uuid");
+  if (projectIdentifier.kind === "uuid" && !supportsProjectUuid) {
+    notFound();
+  }
+
+  const project = await prisma.project.findUnique({
+    where:
+      projectIdentifier.kind === "uuid"
+        ? { uuid: projectIdentifier.uuid }
+        : { id: projectIdentifier.id },
+  });
+  if (!project) {
+    notFound();
+  }
+
+  const tasks = await loadProjectTasks(project.id);
+  const projectRouteId = getRouteId(project);
 
   return (
     <ProjectTasksGrid
-      projectId={String(projectId)}
+      projectId={projectRouteId}
       tasks={tasks.map((task) => ({
         id: task.id,
         title: task.title,

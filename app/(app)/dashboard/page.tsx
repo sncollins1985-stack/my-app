@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, ChevronDown, Database, MoreHorizontal, Plus, ShieldCheck, Users } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getRouteId } from "@/lib/route-id";
 import { AppHeader } from "@/components/app-header";
 import { CreateProjectTrigger } from "@/components/create-project-trigger";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +22,6 @@ export default async function DashboardPage() {
     prisma.project.findMany({
       orderBy: { createdAt: "desc" },
       take: 4,
-      select: { id: true, name: true },
     }),
   ]);
 
@@ -120,7 +120,7 @@ export default async function DashboardPage() {
               recentProjects.map((project, index) => (
                 <Link
                   key={project.id}
-                  href={`/projects/${project.id}/overview`}
+                  href={`/projects/${getRouteId(project)}/overview`}
                   className="flex items-center gap-4 rounded-lg p-1 transition hover:bg-muted/40"
                 >
                   <span

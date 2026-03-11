@@ -10,10 +10,10 @@ type TaskPriorityValue = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type TaskStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "BLOCKED" | "DONE";
 
 type ProjectTaskGridItem = {
-  id: number;
+  id: string;
   title: string;
   description: string | null;
-  assigneeId: number | null;
+  assigneeId: string | null;
   assigneeEmail: string | null;
   assigneeFirstName: string | null;
   assigneeLastName: string | null;

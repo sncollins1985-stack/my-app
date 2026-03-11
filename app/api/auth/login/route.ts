@@ -39,6 +39,6 @@ export async function POST(req: Request) {
     create: { email: user.email, lastLoggedIn: lastLoggedInAt },
   });
 
-  await createSession(user.id);
+  await createSession(user.id, user.uuid);
   return NextResponse.json({ ok: true });
 }

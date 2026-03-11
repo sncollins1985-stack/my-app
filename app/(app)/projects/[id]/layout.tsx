@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { ProjectWorkspaceHeader } from "@/components/project-workspace-header";
 import { ProjectWorkspaceNav } from "@/components/project-workspace-nav";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaModelHasField } from "@/lib/prisma";
+import { parseEntityIdentifier } from "@/lib/entity-id";
+import { getRouteId } from "@/lib/route-id";
 
 interface ProjectWorkspaceLayoutProps {
   children: React.ReactNode;
@@ -15,21 +17,28 @@ export default async function ProjectWorkspaceLayout({
   params,
 }: ProjectWorkspaceLayoutProps) {
   const resolvedParams = await params;
-  const id = Number(resolvedParams.id);
+  const identifier = parseEntityIdentifier(resolvedParams.id);
+  if (!identifier) {
+    notFound();
+  }
 
-  if (!Number.isInteger(id) || id <= 0) {
+  const supportsProjectUuid = prismaModelHasField("Project", "uuid");
+  if (identifier.kind === "uuid" && !supportsProjectUuid) {
     notFound();
   }
 
   const project = await prisma.project.findUnique({
-    where: { id },
+    where:
+      identifier.kind === "uuid"
+        ? { uuid: identifier.uuid }
+        : { id: identifier.id },
   });
 
   if (!project) {
     notFound();
   }
 
-  const projectId = String(project.id);
+  const projectId = getRouteId(project);
 
   return (
     <>

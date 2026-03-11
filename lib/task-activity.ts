@@ -12,7 +12,9 @@ export type TaskActivityField =
 
 export type TaskActivityInsert = {
   taskId: number;
+  taskUuid: string;
   userId: number;
+  userUuid: string;
   actionType: TaskActivityActionType;
   field: TaskActivityField | null;
   oldValue: string | null;
@@ -81,19 +83,24 @@ function normalizeDueDate(value: Date | string | null) {
 
 export function buildTaskFieldChangeActivities(params: {
   taskId: number;
+  taskUuid: string;
   userId: number;
+  userUuid: string;
   previous: TaskActivitySource;
   next: TaskActivitySource;
   previousAssigneeLabel: string;
   nextAssigneeLabel: string;
 }) {
-  const { taskId, userId, previous, next, previousAssigneeLabel, nextAssigneeLabel } = params;
+  const { taskId, taskUuid, userId, userUuid, previous, next, previousAssigneeLabel, nextAssigneeLabel } =
+    params;
   const entries: TaskActivityInsert[] = [];
 
   if (previous.title !== next.title) {
     entries.push({
       taskId,
+      taskUuid,
       userId,
+      userUuid,
       actionType: "FIELD_CHANGED",
       field: "TITLE",
       oldValue: previous.title,
@@ -104,7 +111,9 @@ export function buildTaskFieldChangeActivities(params: {
   if ((previous.description ?? "") !== (next.description ?? "")) {
     entries.push({
       taskId,
+      taskUuid,
       userId,
+      userUuid,
       actionType: "FIELD_CHANGED",
       field: "DESCRIPTION",
       oldValue: normalizeDescription(previous.description),
@@ -115,7 +124,9 @@ export function buildTaskFieldChangeActivities(params: {
   if (previous.assigneeId !== next.assigneeId) {
     entries.push({
       taskId,
+      taskUuid,
       userId,
+      userUuid,
       actionType: "FIELD_CHANGED",
       field: "ASSIGNEE",
       oldValue: previousAssigneeLabel,
@@ -126,7 +137,9 @@ export function buildTaskFieldChangeActivities(params: {
   if ((previous.dueDate ? normalizeDueDate(previous.dueDate) : null) !== normalizeDueDate(next.dueDate)) {
     entries.push({
       taskId,
+      taskUuid,
       userId,
+      userUuid,
       actionType: "FIELD_CHANGED",
       field: "DUE_DATE",
       oldValue: normalizeDueDate(previous.dueDate) ?? "(none)",
@@ -137,7 +150,9 @@ export function buildTaskFieldChangeActivities(params: {
   if (previous.priority !== next.priority) {
     entries.push({
       taskId,
+      taskUuid,
       userId,
+      userUuid,
       actionType: "FIELD_CHANGED",
       field: "PRIORITY",
       oldValue: formatPriority(previous.priority),
@@ -148,7 +163,9 @@ export function buildTaskFieldChangeActivities(params: {
   if (previous.status !== next.status) {
     entries.push({
       taskId,
+      taskUuid,
       userId,
+      userUuid,
       actionType: "FIELD_CHANGED",
       field: "STATUS",
       oldValue: formatStatus(previous.status),
@@ -167,7 +184,9 @@ export async function insertTaskActivities(
     await database.$executeRaw`
       INSERT INTO "TaskActivity" (
         "taskId",
+        "taskUuid",
         "userId",
+        "userUuid",
         "actionType",
         "field",
         "oldValue",
@@ -175,7 +194,9 @@ export async function insertTaskActivities(
       )
       VALUES (
         ${entry.taskId},
+        ${entry.taskUuid},
         ${entry.userId},
+        ${entry.userUuid},
         ${entry.actionType},
         ${entry.field},
         ${entry.oldValue},
@@ -225,24 +246,47 @@ async function ensureTaskActivitySchema(database: RawExecutor) {
   await database.$executeRaw`
     CREATE TABLE IF NOT EXISTS "TaskActivity" (
       "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+      "uuid" TEXT NOT NULL DEFAULT (
+        lower(hex(randomblob(4))) || '-' ||
+        lower(hex(randomblob(2))) || '-' ||
+        '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+        substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+        lower(hex(randomblob(6)))
+      ),
       "taskId" INTEGER NOT NULL,
+      "taskUuid" TEXT NOT NULL,
       "userId" INTEGER NOT NULL,
+      "userUuid" TEXT NOT NULL,
       "actionType" TEXT NOT NULL CHECK ("actionType" IN ('CREATED', 'FIELD_CHANGED')),
       "field" TEXT CHECK ("field" IN ('TITLE', 'DESCRIPTION', 'ASSIGNEE', 'DUE_DATE', 'PRIORITY', 'STATUS')),
       "oldValue" TEXT,
       "newValue" TEXT,
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "TaskActivity_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "Task" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-      CONSTRAINT "TaskActivity_userId_fkey" FOREIGN KEY ("userId") REFERENCES "AuthUser" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+      CONSTRAINT "TaskActivity_taskUuid_fkey" FOREIGN KEY ("taskUuid") REFERENCES "Task" ("uuid") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "TaskActivity_userId_fkey" FOREIGN KEY ("userId") REFERENCES "AuthUser" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+      CONSTRAINT "TaskActivity_userUuid_fkey" FOREIGN KEY ("userUuid") REFERENCES "AuthUser" ("uuid") ON DELETE RESTRICT ON UPDATE CASCADE
     )
+  `;
+  await database.$executeRaw`
+    CREATE UNIQUE INDEX IF NOT EXISTS "TaskActivity_uuid_key"
+    ON "TaskActivity" ("uuid")
   `;
   await database.$executeRaw`
     CREATE INDEX IF NOT EXISTS "TaskActivity_taskId_createdAt_idx"
     ON "TaskActivity" ("taskId", "createdAt")
   `;
   await database.$executeRaw`
+    CREATE INDEX IF NOT EXISTS "TaskActivity_taskUuid_createdAt_idx"
+    ON "TaskActivity" ("taskUuid", "createdAt")
+  `;
+  await database.$executeRaw`
     CREATE INDEX IF NOT EXISTS "TaskActivity_userId_createdAt_idx"
     ON "TaskActivity" ("userId", "createdAt")
+  `;
+  await database.$executeRaw`
+    CREATE INDEX IF NOT EXISTS "TaskActivity_userUuid_createdAt_idx"
+    ON "TaskActivity" ("userUuid", "createdAt")
   `;
 }
 

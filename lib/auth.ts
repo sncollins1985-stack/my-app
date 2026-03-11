@@ -6,7 +6,7 @@ const COOKIE_NAME = "session_token";
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Create a new session (one session per user)
-export async function createSession(userId: number) {
+export async function createSession(userId: number, userUuid: string) {
   // Optional hardening: remove any existing sessions for this user
   await prisma.session.deleteMany({ where: { userId } });
 
@@ -14,7 +14,7 @@ export async function createSession(userId: number) {
   const expiresAt = new Date(Date.now() + SESSION_MS);
 
   await prisma.session.create({
-    data: { token, userId, expiresAt },
+    data: { token, userId, userUuid, expiresAt },
   });
 
   const cookieStore = await cookies();

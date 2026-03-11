@@ -65,10 +65,10 @@ type TaskCommentItem = {
 };
 
 export type TaskDrawerTask = {
-  id: number;
+  id: string;
   title: string;
   description: string | null;
-  assigneeId: number | null;
+  assigneeId: string | null;
   assigneeEmail: string | null;
   assigneeFirstName: string | null;
   assigneeLastName: string | null;
@@ -345,6 +345,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
   const [commentItems, setCommentItems] = useState<TaskCommentItem[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [commentsLoaded, setCommentsLoaded] = useState(false);
   const [commentSaving, setCommentSaving] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSavedPayload, setLastSavedPayload] = useState<string | null>(null);
@@ -356,7 +357,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
     const options = [...(assigneeOptions ?? [])];
 
     if (mode === "edit" && task?.assigneeId) {
-      const taskAssigneeId = String(task.assigneeId);
+      const taskAssigneeId = task.assigneeId;
       const alreadyPresent = options.some((option) => option.id === taskAssigneeId);
       if (!alreadyPresent) {
         options.unshift({
@@ -406,7 +407,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
         const initialPayload = buildTaskMutationPayload({
           title: task.title,
           description: task.description ?? "",
-          assigneeId: task.assigneeId ? String(task.assigneeId) : "unassigned",
+          assigneeId: task.assigneeId ?? "unassigned",
           dueDate: initialDueDate,
           priority: toInputPriority(task.priority),
           status: toInputStatus(task.status),
@@ -415,13 +416,14 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
 
         setTitle(task.title);
         setDescription(task.description ?? "");
-        setAssigneeId(task.assigneeId ? String(task.assigneeId) : "unassigned");
+        setAssigneeId(task.assigneeId ?? "unassigned");
         setDueDate(initialDueDate);
         setPriority(toInputPriority(task.priority));
         setStatus(toInputStatus(task.status));
         setCommentBody("");
         setCommentItems([]);
         setCommentsLoading(false);
+        setCommentsLoaded(false);
         setLastSavedPayload(JSON.stringify(initialPayload));
         setAutoSaveEnabled(true);
         return;
@@ -436,6 +438,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
       setCommentBody("");
       setCommentItems([]);
       setCommentsLoading(false);
+      setCommentsLoaded(false);
       setActivityItems([]);
       setActivityError(null);
       setLastSavedPayload(null);
@@ -471,7 +474,10 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
 
       const options = payload
         .map((entry) => ({
-          id: String(entry.id),
+          id:
+            typeof entry.uuid === "string" && entry.uuid.trim().length > 0
+              ? entry.uuid
+              : String(entry.id),
           label: formatAssigneeLabel({
             firstName: typeof entry.firstName === "string" ? entry.firstName : null,
             lastName: typeof entry.lastName === "string" ? entry.lastName : null,
@@ -493,21 +499,17 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
   }, [assigneeOptions, open]);
 
   const loadTaskActivity = useCallback(
-    async (taskId: number, options?: { background?: boolean }) => {
+    async (taskId: string, options?: { background?: boolean }) => {
       const background = options?.background ?? false;
 
       if (!background) {
         setActivityLoading(true);
-        setActivityItems([]);
       }
       setActivityError(null);
 
       const response = await fetch(`/api/tasks/${taskId}/activity`);
       if (!response.ok) {
         setActivityError(await readErrorMessage(response));
-        if (!background) {
-          setActivityItems([]);
-        }
         setActivityLoading(false);
         return;
       }
@@ -515,9 +517,6 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
       const payload = await response.json().catch(() => []);
       if (!Array.isArray(payload)) {
         setActivityError("Activity response was invalid");
-        if (!background) {
-          setActivityItems([]);
-        }
         setActivityLoading(false);
         return;
       }
@@ -552,21 +551,17 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
   );
 
   const loadTaskComments = useCallback(
-    async (taskId: number, options?: { background?: boolean }) => {
+    async (taskId: string, options?: { background?: boolean }) => {
       const background = options?.background ?? false;
 
       if (!background) {
         setCommentsLoading(true);
-        setCommentItems([]);
       }
       setCommentsError(null);
 
       const response = await fetch(`/api/tasks/${taskId}/comments`);
       if (!response.ok) {
         setCommentsError(await readErrorMessage(response));
-        if (!background) {
-          setCommentItems([]);
-        }
         setCommentsLoading(false);
         return;
       }
@@ -574,9 +569,6 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
       const payload = await response.json().catch(() => []);
       if (!Array.isArray(payload)) {
         setCommentsError("Comments response was invalid");
-        if (!background) {
-          setCommentItems([]);
-        }
         setCommentsLoading(false);
         return;
       }
@@ -592,6 +584,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
         .filter((entry) => Number.isInteger(entry.id) && entry.id > 0 && entry.body.trim().length > 0);
 
       setCommentItems(normalized);
+      setCommentsLoaded(true);
       setCommentsLoading(false);
     },
     []
@@ -610,7 +603,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
   }, [loadTaskActivity, mode, open, task]);
 
   useEffect(() => {
-    if (!open || mode !== "edit" || !task || activeTab !== "comments") {
+    if (!open || mode !== "edit" || !task || activeTab !== "comments" || commentsLoaded) {
       return;
     }
 
@@ -619,7 +612,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
     });
 
     return () => window.cancelAnimationFrame(id);
-  }, [activeTab, loadTaskComments, mode, open, task]);
+  }, [activeTab, commentsLoaded, loadTaskComments, mode, open, task]);
 
   useEffect(() => {
     return () => {
@@ -1033,7 +1026,7 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="comments" className="mt-0">
+                <TabsContent value="comments" className="mt-0 min-h-24">
                   {mode !== "edit" || !task ? (
                     <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
                       Create the task to start comments.
@@ -1073,7 +1066,11 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
                         </div>
                       ) : null}
 
-                      {commentsLoading ? (
+                      {commentsLoading && commentItems.length > 0 ? (
+                        <p className="text-xs text-muted-foreground">Refreshing comments...</p>
+                      ) : null}
+
+                      {commentsLoading && commentItems.length === 0 ? (
                         <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
                           Loading comments...
                         </div>
@@ -1103,39 +1100,44 @@ export function TaskDrawer({ open, mode, projectId, task, onOpenChange }: TaskDr
                   )}
                 </TabsContent>
 
-                <TabsContent value="activity" className="mt-0">
+                <TabsContent value="activity" className="mt-0 min-h-24">
                   {mode !== "edit" || !task ? (
                     <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
                       Create the task to start activity history.
                     </div>
-                  ) : activityLoading ? (
-                    <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
-                      Loading activity...
-                    </div>
                   ) : activityError ? (
                     <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                       {activityError}
+                    </div>
+                  ) : activityLoading && activityItems.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
+                      Loading activity...
                     </div>
                   ) : activityItems.length === 0 ? (
                     <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
                       No activity yet.
                     </div>
                   ) : (
-                    <ol className="space-y-2.5">
-                      {activityItems.map((item) => (
-                        <li key={item.id} className="rounded-md border border-border/70 bg-muted/10 px-3 py-2">
-                          <p className="text-sm font-medium text-foreground">{describeActivity(item)}</p>
-                          {item.oldValue !== null || item.newValue !== null ? (
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              {(item.oldValue ?? "(none)") + " -> " + (item.newValue ?? "(none)")}
+                    <div className="space-y-2.5">
+                      {activityLoading ? (
+                        <p className="text-xs text-muted-foreground">Refreshing activity...</p>
+                      ) : null}
+                      <ol className="space-y-2.5">
+                        {activityItems.map((item) => (
+                          <li key={item.id} className="rounded-md border border-border/70 bg-muted/10 px-3 py-2">
+                            <p className="text-sm font-medium text-foreground">{describeActivity(item)}</p>
+                            {item.oldValue !== null || item.newValue !== null ? (
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {(item.oldValue ?? "(none)") + " -> " + (item.newValue ?? "(none)")}
+                              </p>
+                            ) : null}
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatActivityTimestamp(item.createdAt)}
                             </p>
-                          ) : null}
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {formatActivityTimestamp(item.createdAt)}
-                          </p>
-                        </li>
-                      ))}
-                    </ol>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
                   )}
                 </TabsContent>
               </Tabs>

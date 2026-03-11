@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { AppHeader } from "@/components/app-header";
 import { ManageUsersContent } from "@/components/manage-users-content";
+import { getRouteId } from "@/lib/route-id";
 
 export default async function AdministrationUsersPage() {
   const users = await prisma.user.findMany({ orderBy: { createdAt: "desc" } });
@@ -16,7 +17,7 @@ export default async function AdministrationUsersPage() {
       />
       <ManageUsersContent
         initialUsers={users.map((entry) => ({
-          id: String(entry.id),
+          id: getRouteId(entry),
           email: entry.email,
           firstName: entry.firstName ?? "",
           lastName: entry.lastName ?? "",

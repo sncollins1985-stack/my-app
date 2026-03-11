@@ -6,21 +6,31 @@ import {
   buildTaskFieldChangeActivities,
   insertTaskActivitiesBestEffort,
 } from "@/lib/task-activity";
+import {
+  EntityIdentifier,
+  matchesEntityIdentifier,
+  parseEntityIdentifier,
+  parseOptionalEntityIdentifier,
+} from "@/lib/entity-id";
 
 type TaskPriorityValue = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type TaskStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "BLOCKED" | "DONE";
 
 type TaskRecord = {
   id: number;
+  uuid: string;
   title: string;
   description: string | null;
   assigneeId: number | null;
+  assigneeUuid: string | null;
   dueDate: Date | string | null;
   priority: TaskPriorityValue;
   status: TaskStatusValue;
   projectId: number | null;
+  projectUuid: string | null;
   createdAt: Date | string;
   createdByAuthUserId: number;
+  createdByAuthUserUuid: string;
   createdByEmail: string;
 };
 
@@ -44,60 +54,6 @@ const STATUS_MAP: Record<string, TaskStatusValue> = {
   blocked: "BLOCKED",
   done: "DONE",
 };
-
-type TaskDelegateLike = {
-  findUnique: (args: { where: { id: number } }) => Promise<TaskRecord | null>;
-  update: (args: {
-    where: { id: number };
-    data: {
-      title: string;
-      description: string | null;
-      assigneeId: number | null;
-      dueDate: Date | null;
-      priority: TaskPriorityValue;
-      status: TaskStatusValue;
-      projectId: number | null;
-    };
-  }) => Promise<TaskRecord>;
-};
-
-function getTaskDelegate() {
-  const client = prisma as unknown as { task?: TaskDelegateLike };
-  return client.task ?? null;
-}
-
-function getTaskDelegateFromClient(client: unknown): TaskDelegateLike | null {
-  const typed = client as { task?: TaskDelegateLike };
-  return typed.task ?? null;
-}
-
-function parseRequiredPositiveInt(value: string) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return Number.NaN;
-  }
-
-  return parsed;
-}
-
-function parseOptionalPositiveInt(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const numericValue =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value)
-        : Number.NaN;
-
-  if (!Number.isInteger(numericValue) || numericValue <= 0) {
-    return Number.NaN;
-  }
-
-  return numericValue;
-}
 
 function parseDueDate(value: unknown) {
   if (value === null || value === undefined || value === "") {
@@ -190,6 +146,24 @@ function formatAssigneeLabel(user: Pick<UserRecord, "firstName" | "lastName" | "
   return user.email?.trim() || "Assigned";
 }
 
+function identifierError(fieldName: string) {
+  return `${fieldName} must be a UUID or positive integer`;
+}
+
+function doesTaskProjectMatchIdentifier(
+  identifier: EntityIdentifier | null,
+  task: Pick<TaskRecord, "projectId" | "projectUuid">
+) {
+  if (identifier === null) {
+    return task.projectId === null && task.projectUuid === null;
+  }
+
+  return matchesEntityIdentifier(identifier, {
+    id: task.projectId,
+    uuid: task.projectUuid,
+  });
+}
+
 interface TaskRouteParams {
   params: Promise<{
     taskId: string;
@@ -205,25 +179,18 @@ export async function PATCH(request: Request, { params }: TaskRouteParams) {
     }
 
     const resolvedParams = await params;
-    const taskId = parseRequiredPositiveInt(resolvedParams.taskId);
-    if (Number.isNaN(taskId)) {
-      return NextResponse.json({ error: "taskId must be a positive integer" }, { status: 400 });
+    const taskIdentifier = parseEntityIdentifier(resolvedParams.taskId);
+    if (!taskIdentifier) {
+      return NextResponse.json({ error: identifierError("taskId") }, { status: 400 });
     }
 
     const body = await request.json().catch(() => ({}));
-    const taskDelegate = getTaskDelegate();
-    const existingTask = taskDelegate
-      ? await taskDelegate.findUnique({
-          where: { id: taskId },
-        })
-      : (
-          await prisma.$queryRaw<TaskRecord[]>`
-            SELECT *
-            FROM "Task"
-            WHERE "id" = ${taskId}
-            LIMIT 1
-          `
-        )[0] ?? null;
+    const existingTask = await prisma.task.findUnique({
+      where:
+        taskIdentifier.kind === "uuid"
+          ? { uuid: taskIdentifier.uuid }
+          : { id: taskIdentifier.id },
+    });
 
     if (!existingTask) {
       return NextResponse.json({ error: "Task was not found" }, { status: 404 });
@@ -243,29 +210,69 @@ export async function PATCH(request: Request, { params }: TaskRouteParams) {
       description = normalizedDescription.length > 0 ? normalizedDescription : null;
     }
 
-    const assigneeId =
-      body.assigneeId === undefined ? existingTask.assigneeId : parseOptionalPositiveInt(body.assigneeId);
-    if (Number.isNaN(assigneeId)) {
-      return NextResponse.json(
-        { error: "assigneeId must be a positive integer" },
-        { status: 400 }
-      );
+    let assignee = {
+      id: existingTask.assigneeId,
+      uuid: existingTask.assigneeUuid,
+    };
+    if (body.assigneeId !== undefined) {
+      const assigneeIdentifier = parseOptionalEntityIdentifier(body.assigneeId);
+      if (assigneeIdentifier === "invalid") {
+        return NextResponse.json({ error: identifierError("assigneeId") }, { status: 400 });
+      }
+
+      if (assigneeIdentifier === null) {
+        assignee = { id: null, uuid: null };
+      } else {
+        const resolvedAssignee = await prisma.user.findUnique({
+          where:
+            assigneeIdentifier.kind === "uuid"
+              ? { uuid: assigneeIdentifier.uuid }
+              : { id: assigneeIdentifier.id },
+          select: { id: true, uuid: true },
+        });
+
+        if (!resolvedAssignee) {
+          return NextResponse.json({ error: "assignee was not found" }, { status: 400 });
+        }
+
+        assignee = { id: resolvedAssignee.id, uuid: resolvedAssignee.uuid };
+      }
     }
 
-    const requestedProjectId =
-      body.projectId === undefined ? existingTask.projectId : parseOptionalPositiveInt(body.projectId);
-    if (Number.isNaN(requestedProjectId)) {
-      return NextResponse.json(
-        { error: "projectId must be a positive integer" },
-        { status: 400 }
-      );
-    }
+    let requestedProject = {
+      id: existingTask.projectId,
+      uuid: existingTask.projectUuid,
+    };
+    if (body.projectId !== undefined) {
+      const projectIdentifier = parseOptionalEntityIdentifier(body.projectId);
+      if (projectIdentifier === "invalid") {
+        return NextResponse.json({ error: identifierError("projectId") }, { status: 400 });
+      }
 
-    if (body.projectId !== undefined && requestedProjectId !== existingTask.projectId) {
-      return NextResponse.json(
-        { error: "projectId does not match this task" },
-        { status: 400 }
-      );
+      if (!doesTaskProjectMatchIdentifier(projectIdentifier, existingTask)) {
+        return NextResponse.json(
+          { error: "projectId does not match this task" },
+          { status: 400 }
+        );
+      }
+
+      if (projectIdentifier === null) {
+        requestedProject = { id: null, uuid: null };
+      } else {
+        const resolvedProject = await prisma.project.findUnique({
+          where:
+            projectIdentifier.kind === "uuid"
+              ? { uuid: projectIdentifier.uuid }
+              : { id: projectIdentifier.id },
+          select: { id: true, uuid: true },
+        });
+
+        if (!resolvedProject) {
+          return NextResponse.json({ error: "project was not found" }, { status: 400 });
+        }
+
+        requestedProject = { id: resolvedProject.id, uuid: resolvedProject.uuid };
+      }
     }
 
     const dueDate = Object.prototype.hasOwnProperty.call(body, "dueDate")
@@ -300,30 +307,10 @@ export async function PATCH(request: Request, { params }: TaskRouteParams) {
       );
     }
 
-    if (assigneeId !== null) {
-      const assignee = await prisma.user.findUnique({
-        where: { id: assigneeId },
-        select: { id: true },
-      });
-
-      if (!assignee) {
-        return NextResponse.json({ error: "assignee was not found" }, { status: 400 });
-      }
-    }
-
-    if (requestedProjectId !== null) {
-      const project = await prisma.project.findUnique({
-        where: { id: requestedProjectId },
-        select: { id: true },
-      });
-
-      if (!project) {
-        return NextResponse.json({ error: "project was not found" }, { status: 400 });
-      }
-    }
-
     const assigneeIdsToLookup = Array.from(
-      new Set([existingTask.assigneeId, assigneeId].filter((value): value is number => value !== null))
+      new Set(
+        [existingTask.assigneeId, assignee.id].filter((value): value is number => value !== null)
+      )
     );
     const assigneeRows = assigneeIdsToLookup.length
       ? await prisma.user.findMany({
@@ -331,63 +318,36 @@ export async function PATCH(request: Request, { params }: TaskRouteParams) {
           select: { id: true, firstName: true, lastName: true, email: true },
         })
       : [];
-    const assigneeLabelById = new Map(
-      assigneeRows.map((row) => [row.id, formatAssigneeLabel(row)])
-    );
+    const assigneeLabelById = new Map(assigneeRows.map((row) => [row.id, formatAssigneeLabel(row)]));
 
     const previousAssigneeLabel =
       existingTask.assigneeId === null
         ? "Unassigned"
         : assigneeLabelById.get(existingTask.assigneeId) ?? "Assigned";
     const nextAssigneeLabel =
-      assigneeId === null ? "Unassigned" : assigneeLabelById.get(assigneeId) ?? "Assigned";
+      assignee.id === null ? "Unassigned" : assigneeLabelById.get(assignee.id) ?? "Assigned";
 
     const updatedTask = await prisma.$transaction(async (transaction) => {
-      const transactionTaskDelegate = getTaskDelegateFromClient(transaction as unknown);
-      const result = transactionTaskDelegate
-        ? await transactionTaskDelegate.update({
-            where: { id: taskId },
-            data: {
-              title,
-              description,
-              assigneeId,
-              dueDate,
-              priority,
-              status,
-              projectId: requestedProjectId,
-            },
-          })
-        : await (async () => {
-            await transaction.$executeRaw`
-              UPDATE "Task"
-              SET
-                "title" = ${title},
-                "description" = ${description},
-                "assigneeId" = ${assigneeId},
-                "dueDate" = ${dueDate ? dueDate.toISOString() : null},
-                "priority" = ${priority},
-                "status" = ${status},
-                "projectId" = ${requestedProjectId}
-              WHERE "id" = ${taskId}
-            `;
-
-            const rows = await transaction.$queryRaw<TaskRecord[]>`
-              SELECT *
-              FROM "Task"
-              WHERE "id" = ${taskId}
-              LIMIT 1
-            `;
-
-            if (!rows[0]) {
-              throw new Error("Task update failed");
-            }
-
-            return rows[0];
-          })();
+      const result = await transaction.task.update({
+        where: { id: existingTask.id },
+        data: {
+          title,
+          description,
+          assigneeId: assignee.id,
+          assigneeUuid: assignee.uuid,
+          dueDate,
+          priority,
+          status,
+          projectId: requestedProject.id,
+          projectUuid: requestedProject.uuid,
+        },
+      });
 
       const activityEntries = buildTaskFieldChangeActivities({
-        taskId,
+        taskId: result.id,
+        taskUuid: result.uuid,
         userId: authUser.id,
+        userUuid: authUser.uuid,
         previous: {
           title: existingTask.title,
           description: existingTask.description,

@@ -263,7 +263,10 @@ export function ManageUsersContent({
 
     setUsers((current) => [
       {
-        id: String(createdUser.id),
+        id:
+          typeof createdUser.uuid === "string" && createdUser.uuid.trim().length > 0
+            ? createdUser.uuid
+            : String(createdUser.id),
         email: createdUser.email,
         firstName: createdUser.firstName ?? "",
         lastName: createdUser.lastName ?? "",
