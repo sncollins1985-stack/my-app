@@ -14,6 +14,7 @@ model User {
   lastName     String?
   lastLoggedIn DateTime?
   createdAt    DateTime  @default(now())
+  assignedTasks Task[]   @relation("TaskAssignee")
 }
 model AuthUser {
   id                  Int                  @id @default(autoincrement())
@@ -22,6 +23,8 @@ model AuthUser {
   createdAt           DateTime             @default(now())
   sessions            Session[]
   passwordResetTokens PasswordResetToken[]
+  createdTasks        Task[]               @relation("TaskCreator")
+  taskActivities      TaskActivity[]
 }
 model Session {
   id        Int      @id @default(autoincrement())
@@ -52,8 +55,76 @@ model Project {
   name        String
   description String?
   createdAt   DateTime  @default(now())
+  tasks       Task[]
 
   @@index([createdAt])
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+}
+
+enum TaskActivityActionType {
+  CREATED
+  FIELD_CHANGED
+}
+
+enum TaskActivityField {
+  TITLE
+  DESCRIPTION
+  ASSIGNEE
+  DUE_DATE
+  PRIORITY
+  STATUS
+}
+
+model Task {
+  id                  Int          @id @default(autoincrement())
+  title               String
+  description         String?
+  assigneeId          Int?
+  assignee            User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  dueDate             DateTime?
+  priority            TaskPriority @default(MEDIUM)
+  status              TaskStatus   @default(NOT_STARTED)
+  projectId           Int?
+  project             Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt           DateTime     @default(now())
+  createdByAuthUserId Int
+  createdByAuthUser   AuthUser     @relation("TaskCreator", fields: [createdByAuthUserId], references: [id], onDelete: Restrict)
+  createdByEmail      String
+  activities          TaskActivity[]
+
+  @@index([createdAt])
+  @@index([projectId, createdAt])
+  @@index([assigneeId, createdAt])
+  @@index([createdByAuthUserId, createdAt])
+}
+
+model TaskActivity {
+  id         Int                    @id @default(autoincrement())
+  taskId     Int
+  task       Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId     Int
+  user       AuthUser               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  actionType TaskActivityActionType
+  field      TaskActivityField?
+  oldValue   String?
+  newValue   String?
+  createdAt  DateTime               @default(now())
+
+  @@index([taskId, createdAt])
+  @@index([userId, createdAt])
 }
 
 model OutboundEmail {

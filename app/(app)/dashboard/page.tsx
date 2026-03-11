@@ -38,8 +38,8 @@ export default async function DashboardPage() {
             </p>
           </div>
           <Button asChild className="gap-2">
-            <Link href="/users">
-              Manage users
+            <Link href="/administration/users">
+              Administration
               <ArrowRight className="size-4" />
             </Link>
           </Button>
@@ -120,7 +120,7 @@ export default async function DashboardPage() {
               recentProjects.map((project, index) => (
                 <Link
                   key={project.id}
-                  href={`/projects/${project.id}`}
+                  href={`/projects/${project.id}/overview`}
                   className="flex items-center gap-4 rounded-lg p-1 transition hover:bg-muted/40"
                 >
                   <span

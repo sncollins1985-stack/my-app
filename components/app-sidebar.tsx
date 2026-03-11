@@ -1,19 +1,9 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
-import { ChevronRight, Plus } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { ForrestLogo } from "@/components/forrest-logo";
-import {
-  PROJECT_CREATED_EVENT,
-} from "@/components/project-create-events";
-import { CreateProjectTrigger } from "@/components/create-project-trigger";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   Sidebar,
   SidebarContent,
@@ -24,92 +14,77 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarSeparator,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 
 interface AppSidebarProps {
   userEmail: string;
 }
 
-type ProjectItem = {
-  id: string;
-  name: string;
+type GlobalNavItem = {
+  label: string;
+  href: string;
+  isActive: (pathname: string) => boolean;
 };
+
+const GLOBAL_NAV_ITEMS: GlobalNavItem[] = [
+  {
+    label: "Home",
+    href: "/dashboard",
+    isActive: (pathname) => pathname === "/dashboard",
+  },
+  {
+    label: "My Work",
+    href: "/my-work",
+    isActive: (pathname) => pathname === "/my-work" || pathname.startsWith("/my-work/"),
+  },
+  {
+    label: "Approvals",
+    href: "/approvals",
+    isActive: (pathname) =>
+      pathname === "/approvals" ||
+      pathname.startsWith("/approvals/") ||
+      pathname === "/assurance" ||
+      pathname.startsWith("/assurance/"),
+  },
+  {
+    label: "Projects",
+    href: "/projects",
+    isActive: (pathname) => pathname === "/projects" || pathname.startsWith("/projects/"),
+  },
+  {
+    label: "Portfolios",
+    href: "/portfolios",
+    isActive: (pathname) => pathname === "/portfolios" || pathname.startsWith("/portfolios/"),
+  },
+  {
+    label: "Risks",
+    href: "/risks",
+    isActive: (pathname) => pathname === "/risks" || pathname.startsWith("/risks/"),
+  },
+  {
+    label: "Issues",
+    href: "/issues",
+    isActive: (pathname) => pathname === "/issues" || pathname.startsWith("/issues/"),
+  },
+  {
+    label: "Reports",
+    href: "/reports",
+    isActive: (pathname) => pathname === "/reports" || pathname.startsWith("/reports/"),
+  },
+  {
+    label: "Administration",
+    href: "/administration",
+    isActive: (pathname) =>
+      pathname === "/administration" ||
+      pathname.startsWith("/administration/") ||
+      pathname === "/users" ||
+      pathname.startsWith("/users/"),
+  },
+];
 
 export function AppSidebar({ userEmail }: AppSidebarProps) {
   const pathname = usePathname();
-  const [projects, setProjects] = useState<ProjectItem[]>([]);
-  const [projectsSectionOpen, setProjectsSectionOpen] = useState(() =>
-    pathname.startsWith("/projects")
-  );
-  const [administrationSectionOpen, setAdministrationSectionOpen] = useState(() =>
-    pathname.startsWith("/users")
-  );
-  const mounted = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false
-  );
-  const administrationOpen = pathname.startsWith("/users");
-  const projectsOpen = pathname.startsWith("/projects");
-  const activeProjectPath = pathname.startsWith("/projects/")
-    ? pathname
-    : null;
-
-  useEffect(() => {
-    if (projectsOpen) {
-      setProjectsSectionOpen(true);
-    }
-  }, [projectsOpen]);
-
-  useEffect(() => {
-    if (administrationOpen) {
-      setAdministrationSectionOpen(true);
-    }
-  }, [administrationOpen]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadProjects() {
-      const response = await fetch("/api/projects");
-      if (!response.ok || !active) {
-        return;
-      }
-
-      const payload = await response.json().catch(() => []);
-      if (!Array.isArray(payload)) {
-        return;
-      }
-
-      setProjects(
-        payload
-          .map((entry) => ({
-            id: String(entry.id),
-            name:
-              typeof entry.name === "string" && entry.name.trim().length > 0
-                ? entry.name.trim()
-                : "Unnamed project",
-          }))
-          .filter((entry) => entry.name.length > 0)
-      );
-    }
-
-    const handleProjectCreated = () => {
-      void loadProjects();
-    };
-
-    window.addEventListener(PROJECT_CREATED_EVENT, handleProjectCreated);
-    void loadProjects();
-
-    return () => {
-      active = false;
-      window.removeEventListener(PROJECT_CREATED_EVENT, handleProjectCreated);
-    };
-  }, []);
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
 
   if (!mounted) {
     return (
@@ -117,7 +92,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
         <SidebarHeader className="border-b border-sidebar-border">
           <div className="flex items-center justify-center px-2 py-3">
             <ForrestLogo className="size-14" />
-            <span className="sr-only">Forrest admin dashboard</span>
+            <span className="sr-only">Forrest project workspace</span>
           </div>
         </SidebarHeader>
         <SidebarContent className="overflow-x-hidden pb-4" />
@@ -136,7 +111,7 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
       <SidebarHeader className="border-b border-sidebar-border">
         <div className="flex items-center justify-center px-2 py-3">
           <ForrestLogo className="size-14" />
-          <span className="sr-only">Forrest admin dashboard</span>
+          <span className="sr-only">Forrest project workspace</span>
         </div>
       </SidebarHeader>
 
@@ -144,124 +119,19 @@ export function AppSidebar({ userEmail }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  tooltip="Home"
-                  isActive={pathname === "/dashboard"}
-                >
-                  <Link href="/dashboard">
-                    <span>Home</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  tooltip="Assurance"
-                  isActive={pathname === "/assurance"}
-                >
-                  <Link href="/assurance">
-                    <span>Assurance</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarSeparator />
-
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-
-              <Collapsible
-                asChild
-                open={projectsSectionOpen}
-                onOpenChange={setProjectsSectionOpen}
-              >
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      tooltip="Projects"
-                      className="group/collapsible"
-                    >
-                      <span>Projects</span>
-                      <ChevronRight className="ml-auto size-4 text-sidebar-foreground/60 transition-transform group-data-[state=open]/collapsible:rotate-90" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub className="mx-2 border-l-0 px-1.5">
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton asChild>
-                          <CreateProjectTrigger className="inline-flex w-full items-center gap-2">
-                            <Plus className="size-4" />
-                            <span>Create project</span>
-                          </CreateProjectTrigger>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                      {projects.length === 0 ? (
-                        <SidebarMenuSubItem>
-                          <span className="text-sidebar-foreground/60 text-sm">
-                            No projects yet
-                          </span>
-                        </SidebarMenuSubItem>
-                      ) : (
-                        projects.map((project) => (
-                          <SidebarMenuSubItem key={project.id}>
-                            <SidebarMenuSubButton
-                              asChild
-                              isActive={activeProjectPath === `/projects/${project.id}`}
-                            >
-                              <Link
-                                href={`/projects/${encodeURIComponent(
-                                  project.id
-                                )}`}
-                              >
-                                <span>{project.name}</span>
-                              </Link>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        ))
-                      )}
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
+              {GLOBAL_NAV_ITEMS.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip={item.label}
+                    isActive={item.isActive(pathname)}
+                  >
+                    <Link href={item.href}>
+                      <span>{item.label}</span>
+                    </Link>
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
-              </Collapsible>
-
-              <Collapsible
-                asChild
-                open={administrationSectionOpen}
-                onOpenChange={setAdministrationSectionOpen}
-              >
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      tooltip="Administration"
-                      className="group/collapsible"
-                    >
-                      <span>Administration</span>
-                      <ChevronRight className="ml-auto size-4 text-sidebar-foreground/60 transition-transform group-data-[state=open]/collapsible:rotate-90" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub className="mx-2 border-l-0 px-1.5">
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname === "/users"}
-                        >
-                          <Link href="/users">
-                            <span>Manage users</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useState } from "react";
 import { CircleAlert, Search, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -112,6 +112,19 @@ export function ManageProjectsContent({
     }
   }
 
+  function openProjectWorkspace(projectId: string) {
+    router.push(`/projects/${encodeURIComponent(projectId)}/overview`);
+  }
+
+  function onProjectRowKeyDown(event: KeyboardEvent<HTMLTableRowElement>, projectId: string) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    openProjectWorkspace(projectId);
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -180,13 +193,13 @@ export function ManageProjectsContent({
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Add projects and track them here.
+          Discover projects and open each workspace from this index.
         </p>
       </section>
 
       <section>
         <div className="rounded-xl border bg-card p-5 shadow-sm">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,26rem)] lg:items-start">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold">Project list</h2>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -198,7 +211,7 @@ export function ManageProjectsContent({
               </p>
             </div>
 
-            <div className="relative w-full lg:justify-self-center lg:self-center">
+            <div className="relative w-full sm:w-72">
               <label htmlFor="project-search" className="sr-only">
                 Search projects
               </label>
@@ -208,8 +221,8 @@ export function ManageProjectsContent({
                 type="search"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search projects by name or description"
-                className="h-10 rounded-full border-border/60 bg-muted/40 pl-9 pr-10 text-center shadow-sm focus:bg-background"
+                placeholder="Search projects"
+                className="h-9 rounded-md border-border/60 bg-muted/30 pl-9 pr-10 text-sm shadow-none focus:bg-background"
               />
               {searchQuery ? (
                 <button
@@ -244,7 +257,15 @@ export function ManageProjectsContent({
                 </thead>
                 <tbody className="divide-y divide-border">
                   {filteredProjects.map((project) => (
-                    <tr key={project.id} className="transition hover:bg-muted/40">
+                    <tr
+                      key={project.id}
+                      role="link"
+                      tabIndex={0}
+                      onClick={() => openProjectWorkspace(project.id)}
+                      onKeyDown={(event) => onProjectRowKeyDown(event, project.id)}
+                      className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                      aria-label={`Open ${project.name} workspace`}
+                    >
                       <td className="py-3 pr-4 font-medium">{project.name}</td>
                       <td className="max-w-md py-3 pr-4 text-muted-foreground whitespace-pre-wrap">
                         {project.description || "-"}
