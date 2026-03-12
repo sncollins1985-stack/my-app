@@ -35,6 +35,8 @@ model AuthUser {
   taskActivitiesByUuid      TaskActivity[]       @relation("TaskActivityUserByUuid")
   taskComments              TaskComment[]        @relation("TaskCommentAuthorById")
   taskCommentsByUuid        TaskComment[]        @relation("TaskCommentAuthorByUuid")
+  uploadedDocuments         Document[]           @relation("DocumentUploaderByUuid")
+  createdDocumentFolders    DocumentFolder[]     @relation("DocumentFolderCreatorByUuid")
 }
 
 model Session {
@@ -70,13 +72,14 @@ model PasswordResetToken {
 }
 
 model Project {
-  id          Int      @id @default(autoincrement())
-  uuid        String   @unique @default(uuid())
-  name        String
-  description String?
-  createdAt   DateTime @default(now())
-  tasks       Task[]   @relation("TaskProjectById")
-  tasksByUuid Task[]   @relation("TaskProjectByUuid")
+  id              Int              @id @default(autoincrement())
+  uuid            String           @unique @default(uuid())
+  name            String
+  description     String?
+  createdAt       DateTime         @default(now())
+  tasks           Task[]           @relation("TaskProjectById")
+  tasksByUuid     Task[]           @relation("TaskProjectByUuid")
+  documentFolders DocumentFolder[] @relation("DocumentFolderProjectByUuid")
 
   @@index([createdAt])
 }
@@ -135,6 +138,7 @@ model Task {
   activitiesByUuid        TaskActivity[] @relation("TaskActivityTaskByUuid")
   comments                TaskComment[]  @relation("TaskCommentTaskById")
   commentsByUuid          TaskComment[]  @relation("TaskCommentTaskByUuid")
+  documents               Document[]     @relation("DocumentTaskByUuid")
 
   @@index([createdAt])
   @@index([projectId, createdAt])
@@ -199,4 +203,53 @@ model OutboundEmail {
   createdAt DateTime @default(now())
 
   @@index([kind, createdAt])
+}
+
+model Document {
+  id                String          @id @default(uuid())
+  taskId            String?         @map("task_id")
+  task              Task?           @relation("DocumentTaskByUuid", fields: [taskId], references: [uuid], onDelete: SetNull)
+  documentFolderId  String?         @map("document_folder_id")
+  documentFolder    DocumentFolder? @relation("DocumentFolderDocumentsById", fields: [documentFolderId], references: [id], onDelete: SetNull)
+  name              String
+  originalFilename  String          @map("original_filename")
+  storageProvider   String          @default("local") @map("storage_provider")
+  storageKey        String          @unique @map("storage_key")
+  mimeType          String          @map("mime_type")
+  fileSizeBytes     Int             @map("file_size_bytes")
+  uploadedByUserId  String          @map("uploaded_by_user_id")
+  uploadedByUser    AuthUser        @relation("DocumentUploaderByUuid", fields: [uploadedByUserId], references: [uuid], onDelete: Restrict)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  deletedAt         DateTime?       @map("deleted_at")
+
+  @@index([taskId], map: "documents_task_id_idx")
+  @@index([documentFolderId], map: "documents_document_folder_id_idx")
+  @@index([deletedAt], map: "documents_deleted_at_idx")
+  @@map("documents")
+}
+
+model DocumentFolder {
+  id              String           @id @default(uuid())
+  projectId       String           @map("project_id")
+  project         Project          @relation("DocumentFolderProjectByUuid", fields: [projectId], references: [uuid], onDelete: Cascade)
+  parentFolderId  String?          @map("parent_folder_id")
+  parentFolder    DocumentFolder?  @relation("DocumentFolderHierarchy", fields: [parentFolderId], references: [id], onDelete: SetNull)
+  childFolders    DocumentFolder[] @relation("DocumentFolderHierarchy")
+  name            String
+  description     String?
+  sortOrder       Int?             @map("sort_order")
+  isSystem        Boolean          @default(false) @map("is_system")
+  createdByUserId String?          @map("created_by_user_id")
+  createdByUser   AuthUser?        @relation("DocumentFolderCreatorByUuid", fields: [createdByUserId], references: [uuid], onDelete: SetNull)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  archivedAt      DateTime?        @map("archived_at")
+  documents       Document[]       @relation("DocumentFolderDocumentsById")
+
+  @@unique([projectId, parentFolderId, name], map: "document_folders_project_parent_name_key")
+  @@index([projectId], map: "document_folders_project_id_idx")
+  @@index([parentFolderId], map: "document_folders_parent_folder_id_idx")
+  @@index([archivedAt], map: "document_folders_archived_at_idx")
+  @@map("document_folders")
 }
